@@ -972,7 +972,11 @@ function renderDownloads() {
     $('activeDl').innerHTML = act.map(d => {
       const pct = d.total > 0 ? Math.min(100, Math.round(d.downloaded / d.total * 100)) : 0;
       const st = d.status === 'failed' ? '❌ Failed' : d.status === 'done' ? '✅ Done' : '⏳ ' + pct + '%';
-      return `<div class="dlitem"><div class="nm">${esc(d.filename)}</div>
+      const cancelBtn = d.id !== undefined
+        ? `<button class="iconbtn" onclick="cancelDl('${d.id}')" title="Cancel" style="font-size:18px;">🗑</button>`
+        : '';
+      return `<div class="dlitem"><div style="display:flex;align-items:center;gap:8px;">
+        <div class="nm" style="flex:1;">${esc(d.filename)}</div>${cancelBtn}</div>
         <div class="pbar"><div style="width:${pct}%"></div></div>
         <div class="pct">${st}${d.total ? ' • ' + fmtMB(d.downloaded) + ' / ' + fmtMB(d.total) : ''}</div></div>`;
     }).join('');
@@ -989,6 +993,15 @@ function renderDownloads() {
        <div class="pct">${f.size ? fmtMB(f.size) : ''}</div></div>`).join('');
   }
 }
+window.cancelDl = id => {
+  if (!confirm('Cancel this download?')) return;
+  try {
+    if (window.MusicDost && typeof window.MusicDost.cancelDownload === 'function') {
+      window.MusicDost.cancelDownload(String(id));
+    }
+  } catch (e) {}
+  setTimeout(renderDownloads, 500);
+};
 
 /* ============ LIBRARY ============ */
 function renderLibrary() { renderLiked(); renderPlaylists(); renderPhone(); }

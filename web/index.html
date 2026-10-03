@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>MusicDost</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  :root { --bg: #121212; --card: #1e1e1e; --accent: #1db954; --text: #f5f5f5; --muted: #9a9a9a; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root { --bg: #121212; --card: #1e1e1e; --card2: #262626; --accent: #1db954; --text: #f5f5f5; --muted: #9a9a9a; --danger: #ff6b6b; }
   body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; min-height: 100vh; }
   .hidden { display: none !important; }
 
@@ -18,33 +18,117 @@
     background: var(--card); border: 1px solid #333; border-radius: 12px; color: var(--text); margin-bottom: 12px; }
   #gate button { width: 100%; max-width: 300px; padding: 14px; font-size: 17px; background: var(--accent); border: none;
     border-radius: 12px; color: #000; font-weight: 700; cursor: pointer; }
-  #gateErr { color: #ff6b6b; margin-top: 12px; min-height: 20px; }
+  #gateErr { color: var(--danger); margin-top: 12px; min-height: 20px; }
 
-  /* App */
-  header { position: sticky; top: 0; background: var(--bg); padding: 12px 16px 8px; z-index: 10; }
-  header h1 { font-size: 22px; margin-bottom: 10px; }
-  #searchRow { display: flex; gap: 8px; }
+  /* Tabs */
+  .tab { padding: 12px 16px 150px; min-height: 100vh; }
+  .tab h2 { font-size: 20px; margin: 16px 0 10px; }
+  .tab h3 { font-size: 16px; margin: 18px 0 8px; color: var(--text); }
+  .pageTitle { font-size: 24px; font-weight: 800; margin: 4px 0 12px; }
+
+  /* Chips */
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 12px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex-shrink: 0; padding: 8px 16px; background: var(--card); border: 1px solid #333; border-radius: 20px;
+    color: var(--text); font-size: 14px; cursor: pointer; }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
+  .chip.small { padding: 6px 12px; font-size: 13px; }
+
+  /* Search */
+  #searchRow { display: flex; gap: 8px; margin-bottom: 6px; }
   #q { flex: 1; padding: 12px; font-size: 16px; background: var(--card); border: 1px solid #333; border-radius: 10px; color: var(--text); }
-  #searchBtn { padding: 12px 18px; background: var(--accent); border: none; border-radius: 10px; font-weight: 700; cursor: pointer; }
-  #results { padding: 8px 16px 110px; }
-  .song { display: flex; align-items: center; gap: 10px; background: var(--card); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  #searchBtn { padding: 12px 18px; background: var(--accent); border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 16px; }
+
+  /* Song rows */
+  .song { display: flex; align-items: center; gap: 8px; background: var(--card); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .song .art { width: 44px; height: 44px; border-radius: 8px; background: var(--card2); display: flex; align-items: center;
+    justify-content: center; font-size: 22px; flex-shrink: 0; }
   .song .info { flex: 1; min-width: 0; }
   .song .title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .song .meta { color: var(--muted); font-size: 13px; }
+  .song .meta { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .song .flash { color: var(--accent); font-size: 13px; }
-  .btn { border: none; border-radius: 50%; width: 42px; height: 42px; font-size: 17px; cursor: pointer; flex-shrink: 0; }
-  .play { background: var(--accent); color: #000; }
-  .dl { background: #333; color: var(--text); }
-  #status { text-align: center; color: var(--muted); padding: 20px; }
+  .iconbtn { border: none; background: none; font-size: 20px; cursor: pointer; padding: 6px; flex-shrink: 0; color: var(--text); }
+  .iconbtn:active { transform: scale(0.92); }
+  .btnround { border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 16px; cursor: pointer; flex-shrink: 0;
+    background: var(--accent); color: #000; display: flex; align-items: center; justify-content: center; }
+  .btnround.ghost { background: #333; color: var(--text); }
+  #status, .status { text-align: center; color: var(--muted); padding: 20px; }
 
-  /* Player bar */
-  #player { position: fixed; left: 0; right: 0; bottom: 0; background: #1a1a1a; border-top: 1px solid #333;
-    padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); z-index: 20; }
-  #nowPlaying { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; }
-  #controls { display: flex; align-items: center; gap: 10px; }
-  #ppBtn { width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--accent); font-size: 18px; cursor: pointer; flex-shrink: 0; }
-  #seek { flex: 1; accent-color: var(--accent); }
-  #time { font-size: 12px; color: var(--muted); min-width: 90px; text-align: right; }
+  /* Download progress */
+  .dlitem { background: var(--card); border-radius: 12px; padding: 12px; margin-bottom: 8px; }
+  .dlitem .nm { font-weight: 600; font-size: 14px; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pbar { height: 6px; background: #333; border-radius: 3px; overflow: hidden; }
+  .pbar > div { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+  .dlitem .pct { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* Playlist cards */
+  .plcard { display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: 12px; padding: 14px; margin-bottom: 8px; cursor: pointer; }
+  .plcard .ic { font-size: 28px; }
+  .plcard .nm { font-weight: 700; font-size: 16px; }
+  .plcard .ct { color: var(--muted); font-size: 13px; }
+  .plcard .go { margin-left: auto; color: var(--muted); font-size: 20px; }
+
+  /* Buttons */
+  .bigbtn { display: block; width: 100%; padding: 13px; margin: 8px 0; background: var(--card); border: 1px dashed #444;
+    border-radius: 12px; color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; }
+  .bigbtn.solid { background: var(--accent); border: none; color: #000; }
+  .linkbtn { background: none; border: none; color: var(--accent); font-size: 13px; cursor: pointer; padding: 4px; }
+
+  /* Mini player */
+  #miniplayer { position: fixed; left: 8px; right: 8px; bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 30;
+    background: #232323; border: 1px solid #333; border-radius: 14px; padding: 8px 12px;
+    display: flex; align-items: center; gap: 10px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+  #miniplayer .art { width: 42px; height: 42px; border-radius: 8px; background: var(--card2);
+    display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+  #miniplayer .info { flex: 1; min-width: 0; }
+  #miniplayer .t { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #miniplayer .a { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #miniPP { width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--accent); font-size: 18px; cursor: pointer; flex-shrink: 0; }
+
+  /* Bottom nav */
+  #bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: #1a1a1a; border-top: 1px solid #2a2a2a;
+    display: flex; padding-bottom: env(safe-area-inset-bottom); }
+  #bottomnav button { flex: 1; background: none; border: none; color: var(--muted); padding: 10px 0 8px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; }
+  #bottomnav button .ic { font-size: 22px; }
+  #bottomnav button.on { color: var(--accent); }
+
+  /* Full player */
+  #fullplayer { position: fixed; inset: 0; z-index: 50; background: linear-gradient(180deg, #1c1c1c 0%, #0e0e0e 100%);
+    display: flex; flex-direction: column; padding: calc(12px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom)); }
+  #fpTop { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  #fpClose { background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; padding: 8px; }
+  #fpTitle { font-size: 13px; color: var(--muted); letter-spacing: 2px; }
+  #fpArt { width: min(72vw, 300px); height: min(72vw, 300px); margin: 12px auto; border-radius: 20px; background: var(--card2);
+    display: flex; align-items: center; justify-content: center; font-size: 90px; box-shadow: 0 8px 40px rgba(0,0,0,0.6); }
+  #fpSong { font-size: 22px; font-weight: 800; text-align: center; margin-top: 4px; }
+  #fpArtist { font-size: 15px; color: var(--muted); text-align: center; margin: 4px 0 12px; }
+  #fpSeek { width: 100%; accent-color: var(--accent); }
+  #fpTime { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin: 4px 0 8px; }
+  #fpControls { display: flex; align-items: center; justify-content: center; gap: 28px; margin: 8px 0; }
+  #fpControls button { background: none; border: none; color: var(--text); font-size: 30px; cursor: pointer; }
+  #fpPP { width: 68px !important; height: 68px !important; border-radius: 50% !important; background: var(--accent) !important;
+    color: #000 !important; font-size: 28px !important; display: flex; align-items: center; justify-content: center; }
+  #fpActions { display: flex; justify-content: center; gap: 36px; margin: 10px 0; }
+  #fpActions button { background: none; border: none; font-size: 24px; cursor: pointer; }
+  #fpQueue { flex: 1; overflow-y: auto; margin-top: 8px; border-top: 1px solid #2a2a2a; padding-top: 8px; }
+  #fpQueue .qhead { font-size: 13px; color: var(--muted); margin-bottom: 8px; letter-spacing: 1px; }
+  .qitem { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-radius: 8px; cursor: pointer; }
+  .qitem.cur { background: var(--card); }
+  .qitem .t { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qitem .n { color: var(--muted); font-size: 12px; width: 24px; }
+
+  /* Modal */
+  .modalwrap { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,0.65); display: flex; align-items: flex-end; justify-content: center; }
+  .modal { width: 100%; max-width: 480px; max-height: 70vh; overflow-y: auto; background: #1e1e1e; border-radius: 20px 20px 0 0;
+    padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); }
+  .modal h3 { margin-bottom: 12px; font-size: 17px; }
+  .modal .mrow { display: flex; align-items: center; gap: 10px; padding: 12px 8px; border-radius: 10px; cursor: pointer; font-size: 15px; }
+  .modal .mrow:active { background: #2a2a2a; }
+  .modal .mx { text-align: center; margin-top: 8px; }
+  .modal input[type=text] { width: 100%; padding: 12px; font-size: 16px; background: var(--card2); border: 1px solid #444;
+    border-radius: 10px; color: var(--text); margin-bottom: 10px; }
+
   audio { display: none; }
 </style>
 </head>
@@ -61,35 +145,164 @@
 
 <!-- App -->
 <div id="app" class="hidden">
-  <header>
-    <h1>🎵 MusicDost</h1>
+
+  <!-- HOME -->
+  <main id="tab-home" class="tab">
+    <div class="pageTitle">🎵 MusicDost</div>
+    <div class="chips" id="langChips"></div>
+    <h2 id="trendHead">🔥 Trending</h2>
+    <div id="trendList"><div class="status">Load ho raha hai…</div></div>
+    <h2>🕐 Recently Played</h2>
+    <div id="recentList"><div class="status">Abhi kuch nahi bajaya</div></div>
+  </main>
+
+  <!-- SEARCH -->
+  <main id="tab-search" class="tab hidden">
+    <div class="pageTitle">🔍 Search</div>
     <div id="searchRow">
       <input id="q" placeholder="Gaana ya singer likho…" autocomplete="off">
       <button id="searchBtn">🔍</button>
     </div>
-  </header>
-  <div id="results"><div id="status">Upar search karo 🎶</div></div>
-  <div id="player" class="hidden">
-    <div id="nowPlaying">—</div>
-    <div id="controls">
-      <button id="ppBtn">⏸</button>
-      <input id="seek" type="range" min="0" max="1000" value="0">
-      <span id="time">0:00 / 0:00</span>
+    <div id="histWrap">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0;">
+        <span style="color:var(--muted);font-size:13px;">Recent searches</span>
+        <button class="linkbtn" id="histClear">Clear</button>
+      </div>
+      <div class="chips" id="histChips"></div>
+    </div>
+    <div id="results"><div class="status">Upar search karo 🎶</div></div>
+  </main>
+
+  <!-- DOWNLOADS -->
+  <main id="tab-downloads" class="tab hidden">
+    <div class="pageTitle">⬇️ Downloads</div>
+    <h3>Chal rahe hain</h3>
+    <div id="activeDl"><div class="status">Load ho raha hai…</div></div>
+    <h3>Ho gaye</h3>
+    <div id="doneDl"><div class="status">Load ho raha hai…</div></div>
+  </main>
+
+  <!-- LIBRARY -->
+  <main id="tab-library" class="tab hidden">
+    <div class="pageTitle">📁 Library</div>
+    <h3>❤️ Liked Songs</h3>
+    <div id="likedList"><div class="status">Load ho raha hai…</div></div>
+    <h3>📝 Playlists</h3>
+    <button class="bigbtn" id="newPlBtn">➕ Nayi Playlist Banao</button>
+    <div id="plList"><div class="status">Load ho raha hai…</div></div>
+    <h3>📱 Phone ke Gaane</h3>
+    <div id="phoneList"><div class="status">Load ho raha hai…</div></div>
+  </main>
+
+  <!-- Mini player -->
+  <div id="miniplayer" class="hidden">
+    <div class="art">🎵</div>
+    <div class="info"><div class="t" id="miniT">—</div><div class="a" id="miniA">—</div></div>
+    <button id="miniPP">⏸</button>
+  </div>
+
+  <!-- Bottom nav -->
+  <nav id="bottomnav">
+    <button data-tab="home" class="on"><span class="ic">🏠</span>Home</button>
+    <button data-tab="search"><span class="ic">🔍</span>Search</button>
+    <button data-tab="downloads"><span class="ic">⬇️</span>Downloads</button>
+    <button data-tab="library"><span class="ic">📁</span>Library</button>
+  </nav>
+
+  <!-- Full player -->
+  <div id="fullplayer" class="hidden">
+    <div id="fpTop">
+      <button id="fpClose">✖</button>
+      <span id="fpTitle">NOW PLAYING</span>
+      <span style="width:40px"></span>
+    </div>
+    <div id="fpArt">🎵</div>
+    <div id="fpSong">—</div>
+    <div id="fpArtist">—</div>
+    <input id="fpSeek" type="range" min="0" max="1000" value="0">
+    <div id="fpTime"><span id="fpCur">0:00</span><span id="fpDur">0:00</span></div>
+    <div id="fpControls">
+      <button id="fpPrev">⏮</button>
+      <button id="fpPP">⏸</button>
+      <button id="fpNext">⏭</button>
+    </div>
+    <div id="fpActions">
+      <button id="fpLike" title="Like">🤍</button>
+      <button id="fpPlAdd" title="Playlist me dalo">➕</button>
+      <button id="fpDl" title="Download">⬇️</button>
+    </div>
+    <div id="fpQueue"><div class="qhead">QUEUE</div><div id="fpQueueList"></div></div>
+  </div>
+
+  <!-- Playlist picker modal -->
+  <div id="plmodal" class="modalwrap hidden">
+    <div class="modal">
+      <h3 id="plmodalTitle">Playlist me dalo</h3>
+      <div id="plmodalSong" style="color:var(--muted);font-size:13px;margin-bottom:10px;"></div>
+      <div id="plmodalNew" style="display:flex;gap:8px;margin-bottom:10px;">
+        <input type="text" id="plmodalName" placeholder="Nayi playlist ka naam…" style="margin-bottom:0;">
+        <button class="bigbtn solid" id="plmodalCreate" style="width:auto;padding:12px 18px;margin:0;">➕</button>
+      </div>
+      <div id="plmodalList"></div>
+      <div class="mx"><button class="linkbtn" id="plmodalClose">Band karo</button></div>
     </div>
   </div>
+
   <audio id="audio" preload="metadata"></audio>
 </div>
 
 <script>
+/* ============ Helpers ============ */
 const $ = id => document.getElementById(id);
 const gate = $('gate'), app = $('app'), audio = $('audio');
 
-function fmt(s) {
-  s = Math.max(0, Math.floor(s || 0));
-  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmt(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function skey(s) { return ((s.title || '') + '|' + (s.artist || '')).toLowerCase(); }
+function streamUrl(s) { return '/api/stream?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist); }
+function dlUrl(s) { return '/api/download?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist); }
+function fileName(s) { return ((s.title || '') + ' - ' + (s.artist || '')).replace(/[^\w\s\-()]/g, '').trim().slice(0, 80) + '.mp3'; }
+
+async function apiGet(path) {
+  const r = await fetch(path);
+  if (r.status === 401) { location.reload(); throw new Error('unauth'); }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function apiPost(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  if (r.status === 401) { location.reload(); throw new Error('unauth'); }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
 }
 
-// ---- Code gate ----
+/* ============ State ============ */
+let queue = [], qi = -1;
+let likedSet = new Set();
+let currentTab = 'home';
+const listReg = {}; let listSeq = 0;
+function regList(arr) { const id = 'L' + (++listSeq); listReg[id] = arr; return id; }
+function getSong(listId, idx) { const a = listReg[listId]; return a ? a[idx] : null; }
+
+function loadJSON(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
+function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+
+function addRecent(s) {
+  let r = loadJSON('md_recent', []);
+  r = r.filter(x => skey(x) !== skey(s));
+  r.unshift({ title: s.title, artist: s.artist, duration: s.duration || 0 });
+  saveJSON('md_recent', r.slice(0, 20));
+  if (currentTab === 'home') renderRecent();
+}
+function addHistory(q) {
+  let h = loadJSON('md_history', []);
+  h = h.filter(x => x !== q);
+  h.unshift(q);
+  saveJSON('md_history', h.slice(0, 10));
+  renderHistChips();
+}
+
+/* ============ Code gate ============ */
 $('codeBtn').onclick = verify;
 $('codeInput').onkeydown = e => { if (e.key === 'Enter') verify(); };
 async function verify() {
@@ -97,98 +310,393 @@ async function verify() {
   if (!code) return;
   $('gateErr').textContent = '';
   try {
-    const r = await fetch('/api/verify', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({code})
-    });
-    if (r.ok) { gate.classList.add('hidden'); app.classList.remove('hidden'); $('q').focus(); }
+    const r = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
+    if (r.ok) { gate.classList.add('hidden'); app.classList.remove('hidden'); boot(); }
     else $('gateErr').textContent = 'Galat code 😅';
   } catch (e) { $('gateErr').textContent = 'Server se baat nahi ho rahi'; }
   $('codeInput').value = '';
 }
 
-// ---- Search ----
-$('searchBtn').onclick = search;
-$('q').onkeydown = e => { if (e.key === 'Enter') search(); };
-let searching = false;
-async function search() {
-  const q = $('q').value.trim();
-  if (!q || searching) return;
-  searching = true;
-  $('results').innerHTML = '<div id="status">Dhundh rahe hain… 🔍</div>';
-  try {
-    const r = await fetch('/api/search?q=' + encodeURIComponent(q));
-    if (r.status === 401) return location.reload();
-    const d = await r.json();
-    render(d.results || []);
-  } catch (e) {
-    $('results').innerHTML = '<div id="status">Kuch gadbad hui 😅</div>';
-  }
-  searching = false;
-}
-function render(list) {
-  if (!list.length) { $('results').innerHTML = '<div id="status">Kuch nahi mila 😕</div>'; return; }
-  $('results').innerHTML = list.map((s, i) => `
-    <div class="song">
-      <div class="info">
-        <div class="title">${esc(s.title)} ${s.cached ? '<span class="flash">⚡</span>' : ''}</div>
-        <div class="meta">${esc(s.artist)}${s.duration ? ' • ' + fmt(s.duration) : ''}</div>
-      </div>
-      <button class="btn play" data-i="${i}" title="Play">▶</button>
-      <button class="btn dl" data-i="${i}" title="Download">⬇</button>
-    </div>`).join('');
-  window._songs = list;
-  document.querySelectorAll('.btn.play').forEach(b => b.onclick = () => playSong(+b.dataset.i));
-  document.querySelectorAll('.btn.dl').forEach(b => b.onclick = () => dlSong(+b.dataset.i));
-}
-function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-function streamUrl(s) {
-  return '/api/stream?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist);
+function boot() {
+  renderLangChips();
+  renderHistChips();
+  loadLiked().then(() => { loadTrending('hindi'); });
+  renderRecent();
+  showTab('home');
 }
 
-// ---- Player ----
-function playSong(i) {
-  const s = window._songs[i];
+/* ============ Tabs ============ */
+document.querySelectorAll('#bottomnav button').forEach(b => {
+  b.onclick = () => showTab(b.dataset.tab);
+});
+function showTab(t) {
+  currentTab = t;
+  document.querySelectorAll('#bottomnav button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  ['home', 'search', 'downloads', 'library'].forEach(x => $('tab-' + x).classList.toggle('hidden', x !== t));
+  if (t === 'downloads') renderDownloads();
+  if (t === 'library') renderLibrary();
+  if (t === 'home') renderRecent();
+}
+
+/* ============ Player core ============ */
+function playQueue(list, idx) {
+  if (!list || !list.length) return;
+  queue = list; qi = Math.max(0, idx || 0);
+  playCurrent();
+}
+function playCurrent() {
+  const s = queue[qi];
   if (!s) return;
   audio.src = streamUrl(s);
   audio.play().catch(() => {});
-  $('nowPlaying').textContent = s.title + ' — ' + s.artist;
-  $('player').classList.remove('hidden');
-  $('ppBtn').textContent = '⏸';
+  $('miniT').textContent = s.title || '—';
+  $('miniA').textContent = s.artist || '';
+  $('miniplayer').classList.remove('hidden');
+  $('miniPP').textContent = '⏸';
+  $('fpSong').textContent = s.title || '—';
+  $('fpArtist').textContent = s.artist || '';
+  $('fpPP').textContent = '⏸';
+  renderFpQueue();
+  updateLikeUI();
+  addRecent(s);
   if ('mediaSession' in navigator) {
-    try {
-      navigator.mediaSession.metadata = new MediaMetadata({ title: s.title, artist: s.artist, album: 'MusicDost' });
-    } catch (e) {}
+    try { navigator.mediaSession.metadata = new MediaMetadata({ title: s.title, artist: s.artist, album: 'MusicDost' }); } catch (e) {}
   }
 }
-$('ppBtn').onclick = () => {
-  if (audio.paused) { audio.play().catch(() => {}); $('ppBtn').textContent = '⏸'; }
-  else { audio.pause(); $('ppBtn').textContent = '▶'; }
-};
-audio.onended = () => { $('ppBtn').textContent = '▶'; };
-audio.ontimeupdate = () => {
-  if (audio.duration) $('seek').value = Math.floor(audio.currentTime / audio.duration * 1000);
-  $('time').textContent = fmt(audio.currentTime) + ' / ' + fmt(audio.duration);
-};
-$('seek').oninput = () => {
-  if (audio.duration) audio.currentTime = $('seek').value / 1000 * audio.duration;
-};
+function togglePlay() {
+  if (!queue.length) return;
+  if (audio.paused) { audio.play().catch(() => {}); }
+  else { audio.pause(); }
+}
+function playNext() { if (qi < queue.length - 1) { qi++; playCurrent(); } }
+function playPrev() { if (audio.currentTime > 3) { audio.currentTime = 0; } else if (qi > 0) { qi--; playCurrent(); } }
 
-// ---- Download: native app bridge ho to wahi, nahi to seedha link ----
-function dlSong(i) {
-  const s = window._songs[i];
-  if (!s) return;
-  const rel = '/api/download?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist);
-  const fname = (s.title + ' - ' + s.artist).replace(/[^\w\s\-()]/g, '').trim() + '.mp3';
+audio.onended = () => playNext();
+audio.onplay = () => { $('miniPP').textContent = '⏸'; $('fpPP').textContent = '⏸'; };
+audio.onpause = () => { $('miniPP').textContent = '▶'; $('fpPP').textContent = '▶'; };
+audio.ontimeupdate = () => {
+  if (audio.duration) {
+    const v = Math.floor(audio.currentTime / audio.duration * 1000);
+    $('fpSeek').value = v;
+  }
+  $('fpCur').textContent = fmt(audio.currentTime);
+  $('fpDur').textContent = fmt(audio.duration);
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.setPositionState({ duration: audio.duration || 0, playbackRate: 1, position: audio.currentTime || 0 });
+    } catch (e) {}
+  }
+};
+$('miniPP').onclick = e => { e.stopPropagation(); togglePlay(); };
+$('miniplayer').onclick = () => openFullPlayer();
+$('fpSeek').oninput = () => { if (audio.duration) audio.currentTime = $('fpSeek').value / 1000 * audio.duration; };
+$('fpPP').onclick = togglePlay;
+$('fpNext').onclick = playNext;
+$('fpPrev').onclick = playPrev;
+$('fpClose').onclick = closeFullPlayer;
+
+function openFullPlayer() {
+  if (!queue.length) return;
+  $('fullplayer').classList.remove('hidden');
+  renderFpQueue();
+  updateLikeUI();
+}
+function closeFullPlayer() { $('fullplayer').classList.add('hidden'); }
+// neeche swipe karke band karo
+(function () {
+  let sy = 0;
+  const fp = $('fullplayer');
+  fp.addEventListener('touchstart', e => { sy = e.touches[0].clientY; }, { passive: true });
+  fp.addEventListener('touchend', e => {
+    const dy = e.changedTouches[0].clientY - sy;
+    if (dy > 120) closeFullPlayer();
+  }, { passive: true });
+})();
+
+function renderFpQueue() {
+  $('fpQueueList').innerHTML = queue.map((s, i) =>
+    `<div class="qitem${i === qi ? ' cur' : ''}" onclick="jumpQueue(${i})">
+       <span class="n">${i + 1}</span><span class="t">${esc(s.title)} — ${esc(s.artist)}</span>
+     </div>`).join('') || '<div class="status">Queue khaali hai</div>';
+}
+window.jumpQueue = i => { qi = i; playCurrent(); };
+
+/* ============ Liked ============ */
+async function loadLiked() {
+  try {
+    const d = await apiGet('/api/liked');
+    likedSet = new Set((d.songs || []).map(skey));
+  } catch (e) { likedSet = new Set(); }
+}
+async function toggleLike(s) {
+  const k = skey(s), has = likedSet.has(k);
+  if (has) likedSet.delete(k); else likedSet.add(k);
+  updateLikeUI();
+  try {
+    await apiPost('/api/liked', { title: s.title, artist: s.artist, liked: !has });
+  } catch (e) { /* wapas karo */ if (has) likedSet.add(k); else likedSet.delete(k); updateLikeUI(); }
+  if (currentTab === 'library') renderLiked();
+}
+function updateLikeUI() {
+  const s = queue[qi];
+  $('fpLike').textContent = (s && likedSet.has(skey(s))) ? '❤️' : '🤍';
+  // visible song rows ke like buttons refresh karo
+  document.querySelectorAll('[data-likebtn]').forEach(b => {
+    const sk = b.getAttribute('data-likebtn');
+    b.textContent = likedSet.has(sk) ? '❤️' : '🤍';
+  });
+}
+$('fpLike').onclick = () => { const s = queue[qi]; if (s) toggleLike(s); };
+$('fpDl').onclick = () => { const s = queue[qi]; if (s) dlSongDirect(s); };
+$('fpPlAdd').onclick = () => { const s = queue[qi]; if (s) openPlPicker(s); };
+
+/* ============ Download ============ */
+function dlSongDirect(s) {
+  const rel = dlUrl(s), fname = fileName(s);
   if (window.MusicDost && typeof window.MusicDost.download === 'function') {
-    // Android app: ABSOLUTE URL chahiye DownloadManager ke liye
-    window.MusicDost.download(location.origin + rel, fname);
+    try { window.MusicDost.download(location.origin + rel, fname); } catch (e) {}
   } else {
     const a = document.createElement('a');
     a.href = rel; a.download = fname;
     document.body.appendChild(a); a.click(); a.remove();
   }
 }
+window.uiDl = (listId, idx) => { const s = getSong(listId, idx); if (s) dlSongDirect(s); };
+window.uiPlay = (listId, idx) => { const a = listReg[listId]; if (a) playQueue(a, idx); };
+window.uiLike = (listId, idx) => { const s = getSong(listId, idx); if (s) toggleLike(s); };
+window.uiMenu = (listId, idx) => { const s = getSong(listId, idx); if (s) openPlPicker(s); };
+
+/* ============ Song row ============ */
+function songRow(s, listId, idx, opts) {
+  opts = opts || {};
+  const k = esc(skey(s));
+  const liked = likedSet.has(skey(s)) ? '❤️' : '🤍';
+  let btns = `<button class="btnround" onclick="uiPlay('${listId}',${idx})" title="Play">▶</button>`;
+  if (!opts.noDl) btns += `<button class="btnround ghost" onclick="uiDl('${listId}',${idx})" title="Download">⬇</button>`;
+  if (opts.like !== false) btns += `<button class="iconbtn" data-likebtn="${k}" onclick="uiLike('${listId}',${idx})" title="Like">${liked}</button>`;
+  if (opts.menu !== false) btns += `<button class="iconbtn" onclick="uiMenu('${listId}',${idx})" title="Playlist me dalo">⋮</button>`;
+  if (opts.remove) btns += `<button class="iconbtn" onclick="${opts.remove}" title="Hatao">❌</button>`;
+  return `<div class="song">
+    <div class="art">🎵</div>
+    <div class="info" onclick="uiPlay('${listId}',${idx})" style="cursor:pointer">
+      <div class="title">${esc(s.title)} ${s.cached ? '<span class="flash">⚡</span>' : ''}</div>
+      <div class="meta">${esc(s.artist)}${s.duration ? ' • ' + fmt(s.duration) : ''}</div>
+    </div>${btns}</div>`;
+}
+function songListHTML(arr, opts) {
+  if (!arr || !arr.length) return '<div class="status">Kuch nahi hai 😕</div>';
+  const id = regList(arr);
+  return arr.map((s, i) => songRow(s, id, i, opts)).join('');
+}
+
+/* ============ HOME: Trending ============ */
+const LANGS = [
+  { id: 'hindi', label: 'Hindi' }, { id: 'english', label: 'English' },
+  { id: 'punjabi', label: 'Punjabi' }, { id: 'haryanvi', label: 'Haryanvi' },
+  { id: 'bhojpuri', label: 'Bhojpuri' }, { id: 'bhakti', label: 'Bhakti' },
+];
+let curLang = 'hindi';
+function renderLangChips() {
+  $('langChips').innerHTML = LANGS.map(l =>
+    `<button class="chip${l.id === curLang ? ' on' : ''}" onclick="setLang('${l.id}')">${l.label}</button>`).join('');
+}
+window.setLang = l => { curLang = l; renderLangChips(); loadTrending(l); };
+async function loadTrending(lang) {
+  $('trendList').innerHTML = '<div class="status">Load ho raha hai… 🔥</div>';
+  try {
+    const d = await apiGet('/api/trending?lang=' + encodeURIComponent(lang));
+    $('trendHead').textContent = '🔥 ' + (d.name || 'Trending');
+    $('trendList').innerHTML = songListHTML(d.songs || []);
+  } catch (e) {
+    $('trendList').innerHTML = '<div class="status">Load nahi hua 😅</div>';
+  }
+}
+function renderRecent() {
+  const r = loadJSON('md_recent', []);
+  $('recentList').innerHTML = r.length ? songListHTML(r, { menu: false }) : '<div class="status">Abhi kuch nahi bajaya</div>';
+}
+
+/* ============ SEARCH ============ */
+$('searchBtn').onclick = doSearch;
+$('q').onkeydown = e => { if (e.key === 'Enter') doSearch(); };
+$('histClear').onclick = () => { saveJSON('md_history', []); renderHistChips(); };
+function renderHistChips() {
+  const h = loadJSON('md_history', []);
+  $('histChips').innerHTML = h.length
+    ? h.map(q => `<button class="chip small" onclick="histSearch(${JSON.stringify(q).replace(/"/g, '&quot;')})">${esc(q)}</button>`).join('')
+    : '<span style="color:var(--muted);font-size:13px;">Koi history nahi</span>';
+}
+window.histSearch = q => { $('q').value = q; doSearch(); };
+let searching = false;
+async function doSearch() {
+  const q = $('q').value.trim();
+  if (!q || searching) return;
+  searching = true;
+  addHistory(q);
+  $('results').innerHTML = '<div class="status">Dhundh rahe hain… 🔍</div>';
+  try {
+    const d = await apiGet('/api/search?q=' + encodeURIComponent(q));
+    $('results').innerHTML = songListHTML(d.results || []);
+  } catch (e) {
+    $('results').innerHTML = '<div class="status">Kuch gadbad hui 😅</div>';
+  }
+  searching = false;
+}
+
+/* ============ DOWNLOADS ============ */
+function bridgeGet(fn) {
+  try {
+    if (window.MusicDost && typeof window.MusicDost[fn] === 'function') {
+      const raw = window.MusicDost[fn]();
+      return raw ? JSON.parse(raw) : null;
+    }
+  } catch (e) {}
+  return null;
+}
+function fmtMB(b) { return (b / 1048576).toFixed(1) + ' MB'; }
+function renderDownloads() {
+  // Active
+  const act = bridgeGet('getActiveDownloads');
+  if (act === null) {
+    $('activeDl').innerHTML = '<div class="status">Active downloads sirf app me dikhenge 📱</div>';
+  } else if (!act.length) {
+    $('activeDl').innerHTML = '<div class="status">Koi download chal nahi raha</div>';
+  } else {
+    $('activeDl').innerHTML = act.map(d => {
+      const pct = d.total > 0 ? Math.min(100, Math.round(d.downloaded / d.total * 100)) : 0;
+      const st = d.status === 'failed' ? '❌ Fail' : d.status === 'done' ? '✅ Ho gaya' : '⏳ ' + pct + '%';
+      return `<div class="dlitem"><div class="nm">${esc(d.filename)}</div>
+        <div class="pbar"><div style="width:${pct}%"></div></div>
+        <div class="pct">${st}${d.total ? ' • ' + fmtMB(d.downloaded) + ' / ' + fmtMB(d.total) : ''}</div></div>`;
+    }).join('');
+  }
+  // Done
+  const done = bridgeGet('listDownloads');
+  if (done === null) {
+    $('doneDl').innerHTML = '<div class="status">Downloaded files sirf app me dikhengi 📱</div>';
+  } else if (!done.length) {
+    $('doneDl').innerHTML = '<div class="status">Abhi kuch download nahi kiya</div>';
+  } else {
+    $('doneDl').innerHTML = done.map(f =>
+      `<div class="dlitem"><div class="nm">🎵 ${esc(f.name)}</div>
+       <div class="pct">${f.size ? fmtMB(f.size) : ''}</div></div>`).join('');
+  }
+}
+
+/* ============ LIBRARY ============ */
+function renderLibrary() { renderLiked(); renderPlaylists(); renderPhone(); }
+
+async function renderLiked() {
+  $('likedList').innerHTML = '<div class="status">Load ho raha hai…</div>';
+  try {
+    const d = await apiGet('/api/liked');
+    const arr = d.songs || [];
+    // likedSet sync rakho
+    likedSet = new Set(arr.map(skey));
+    updateLikeUI();
+    $('likedList').innerHTML = arr.length ? songListHTML(arr, { like: false }) : '<div class="status">Abhi kuch like nahi kiya 🤍</div>';
+  } catch (e) { $('likedList').innerHTML = '<div class="status">Load nahi hua 😅</div>'; }
+}
+
+async function renderPlaylists() {
+  $('plList').innerHTML = '<div class="status">Load ho raha hai…</div>';
+  try {
+    const d = await apiGet('/api/playlists');
+    const pls = d.playlists || [];
+    $('plList').innerHTML = pls.length ? pls.map((p, i) =>
+      `<div class="plcard" onclick="openPlaylist(${JSON.stringify(p.name).replace(/"/g, '&quot;')})">
+         <span class="ic">📝</span>
+         <span><div class="nm">${esc(p.name)}</div><div class="ct">${p.count || 0} gaane</div></span>
+         <span class="go">›</span></div>`).join('')
+      : '<div class="status">Koi playlist nahi — upar se banao 📝</div>';
+  } catch (e) { $('plList').innerHTML = '<div class="status">Load nahi hua 😅</div>'; }
+}
+
+window.openPlaylist = async name => {
+  $('plList').innerHTML = '<div class="status">Khul raha hai…</div>';
+  try {
+    const d = await apiGet('/api/playlist?name=' + encodeURIComponent(name));
+    const arr = d.songs || [];
+    const id = regList(arr);
+    $('plList').innerHTML =
+      `<button class="linkbtn" onclick="renderPlaylists()">‹ Wapas</button>
+       <h3 style="margin-top:4px;">📝 ${esc(name)} (${arr.length})</h3>` +
+      (arr.length ? arr.map((s, i) => songRow(s, id, i, { remove: `plRemove(${JSON.stringify(name).replace(/"/g, '&quot;')},'${id}',${i})` })).join('')
+        : '<div class="status">Playlist khaali hai</div>');
+  } catch (e) { $('plList').innerHTML = '<div class="status">Khul nahi paya 😅</div>'; }
+};
+window.plRemove = async (name, listId, idx) => {
+  const s = getSong(listId, idx);
+  if (!s) return;
+  try {
+    await apiPost('/api/playlist/remove', { name, title: s.title, artist: s.artist });
+    openPlaylist(name);
+  } catch (e) {}
+};
+
+$('newPlBtn').onclick = async () => {
+  const name = prompt('Playlist ka naam:');
+  if (!name || !name.trim()) return;
+  try {
+    await apiPost('/api/playlists', { name: name.trim() });
+    renderPlaylists();
+  } catch (e) { alert('Ban nahi payi 😅'); }
+};
+
+function renderPhone() {
+  const files = bridgeGet('listDownloads');
+  if (files === null) {
+    $('phoneList').innerHTML = '<div class="status">Phone ke gaane sirf app me dikhenge 📱</div>';
+  } else if (!files.length) {
+    $('phoneList').innerHTML = '<div class="status">Phone me koi gaana nahi</div>';
+  } else {
+    $('phoneList').innerHTML = files.map(f =>
+      `<div class="dlitem"><div class="nm">🎵 ${esc(f.name)}</div>
+       <div class="pct">${f.size ? fmtMB(f.size) : ''}</div></div>`).join('');
+  }
+}
+
+/* ============ Playlist picker modal ============ */
+let plPickSong = null;
+function openPlPicker(s) {
+  plPickSong = s;
+  $('plmodalSong').textContent = s.title + ' — ' + s.artist;
+  $('plmodalName').value = '';
+  $('plmodal').classList.remove('hidden');
+  loadPlModalList();
+}
+async function loadPlModalList() {
+  $('plmodalList').innerHTML = '<div class="status">Load ho raha hai…</div>';
+  try {
+    const d = await apiGet('/api/playlists');
+    const pls = d.playlists || [];
+    $('plmodalList').innerHTML = pls.length ? pls.map(p =>
+      `<div class="mrow" onclick="plPickAdd(${JSON.stringify(p.name).replace(/"/g, '&quot;')})">
+         <span>📝</span><span>${esc(p.name)}</span><span style="color:var(--muted);font-size:12px;">${p.count || 0}</span></div>`).join('')
+      : '<div class="status">Koi playlist nahi — upar se nayi banao</div>';
+  } catch (e) { $('plmodalList').innerHTML = '<div class="status">Load nahi hua 😅</div>'; }
+}
+window.plPickAdd = async name => {
+  if (!plPickSong) return;
+  try {
+    await apiPost('/api/playlist/add', { name, title: plPickSong.title, artist: plPickSong.artist });
+    closePlModal();
+    if (currentTab === 'library') renderPlaylists();
+  } catch (e) {}
+};
+$('plmodalCreate').onclick = async () => {
+  const name = $('plmodalName').value.trim();
+  if (!name || !plPickSong) return;
+  try {
+    await apiPost('/api/playlists', { name });
+    await apiPost('/api/playlist/add', { name, title: plPickSong.title, artist: plPickSong.artist });
+    closePlModal();
+    if (currentTab === 'library') renderPlaylists();
+  } catch (e) {}
+};
+function closePlModal() { $('plmodal').classList.add('hidden'); plPickSong = null; }
+$('plmodalClose').onclick = closePlModal;
+$('plmodal').onclick = e => { if (e.target === $('plmodal')) closePlModal(); };
 </script>
 </body>
 </html>

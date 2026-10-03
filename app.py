@@ -345,6 +345,13 @@ def search():
     if not q:
         return jsonify({"results": []})
 
+    # 0. iTunes se sahi gaane nikalo (bot jaisa) — sabse upar dikhenge
+    itunes_hits = []
+    try:
+        itunes_hits = dl_engine.web_song_search(q, n=5)
+    except Exception:
+        pass
+
     def relevance(title, artist):
         """Query se kitna milta hai — zyada score = upar dikhega."""
         import re
@@ -442,6 +449,22 @@ def search():
             })
     except Exception:
         pass
+    # iTunes ke sahi gaane sabse upar (bot jaisa)
+    for h in itunes_hits:
+        t, a = h.get("title", ""), h.get("artist", "")
+        if not t:
+            continue
+        # Duplicate na ho
+        if any(x.get("title", "").lower() == t.lower() for x in out):
+            continue
+        key = (t + "|" + a).lower()
+        cpath = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
+        cached = os.path.exists(cpath) and os.path.getsize(cpath) > 50 * 1024
+        out.append({
+            "key": key, "title": t, "artist": a,
+            "duration": 0, "cached": cached,
+            "image": "", "_score": 200,
+        })
     out.sort(key=lambda x: x["_score"], reverse=True)
     for x in out:
         del x["_score"]

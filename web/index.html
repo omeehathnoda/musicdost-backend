@@ -151,9 +151,62 @@
     border-radius: 10px; color: var(--text); margin-bottom: 10px; }
 
   audio { display: none; }
+
+  /* Splash screen */
+  #splash { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; overflow: hidden;
+    background: radial-gradient(ellipse at 50% 30%, #1a3a24 0%, #0d0d0d 70%);
+    transition: opacity 0.8s ease; }
+  #splash.fade { opacity: 0; pointer-events: none; }
+  .splash-note { position: absolute; bottom: -40px; font-size: 28px; opacity: 0;
+    animation: floatUp 4s ease-in infinite; }
+  @keyframes floatUp {
+    0% { transform: translateY(0) rotate(-10deg); opacity: 0; }
+    15% { opacity: 0.8; }
+    100% { transform: translateY(-110vh) rotate(15deg); opacity: 0; } }
+  #splash .by { font-size: 15px; letter-spacing: 8px; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px; animation: fadeIn 1s ease 0.2s both; }
+  #splash .omee { font-size: 84px; font-weight: 900; letter-spacing: 4px;
+    background: linear-gradient(90deg, #1db954, #7dffb0, #1db954);
+    background-size: 200% auto; -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: transparent;
+    animation: shine 2.5s linear infinite, popIn 0.9s cubic-bezier(0.2,1.4,0.4,1) 0.4s both;
+    filter: drop-shadow(0 0 24px rgba(29,185,84,0.45)); }
+  @keyframes shine { to { background-position: 200% center; } }
+  @keyframes popIn { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  #splash .presents { margin-top: 10px; font-size: 16px; color: var(--muted);
+    letter-spacing: 3px; animation: fadeIn 1s ease 1.2s both; }
+  #splash .md { font-size: 30px; font-weight: 800; margin-top: 4px;
+    animation: fadeIn 1s ease 1.5s both; }
+  #splash .md span { color: var(--accent); }
+  .eq { display: flex; gap: 5px; margin-top: 28px; height: 36px; align-items: flex-end;
+    animation: fadeIn 1s ease 1.8s both; }
+  .eq i { width: 6px; border-radius: 3px; background: var(--accent);
+    animation: eqb 0.9s ease-in-out infinite; }
+  .eq i:nth-child(1) { animation-delay: 0s; } .eq i:nth-child(2) { animation-delay: 0.15s; }
+  .eq i:nth-child(3) { animation-delay: 0.3s; } .eq i:nth-child(4) { animation-delay: 0.45s; }
+  .eq i:nth-child(5) { animation-delay: 0.6s; } .eq i:nth-child(6) { animation-delay: 0.3s; }
+  .eq i:nth-child(7) { animation-delay: 0.15s; }
+  @keyframes eqb { 0%,100% { height: 8px; } 50% { height: 34px; } }
+
 </style>
 </head>
 <body>
+<!-- Splash: Omee -->
+<div id="splash">
+  <span class="splash-note" style="left:12%;animation-delay:0s;">🎵</span>
+  <span class="splash-note" style="left:28%;animation-delay:1.2s;font-size:20px;">🎶</span>
+  <span class="splash-note" style="left:55%;animation-delay:0.6s;">🎵</span>
+  <span class="splash-note" style="left:72%;animation-delay:1.8s;font-size:22px;">🎶</span>
+  <span class="splash-note" style="left:86%;animation-delay:0.9s;">🎵</span>
+  <div class="by">Crafted by</div>
+  <div class="omee">Omee</div>
+  <div class="presents">presents</div>
+  <div class="md">🎵 Music<span>Dost</span></div>
+  <div class="eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+</div>
+
 
 <!-- Code gate: pehla page -->
 <div id="gate">
@@ -346,6 +399,17 @@ async function apiPost(path, body) {
   if (!r.ok) throw new Error('HTTP ' + r.status);
   return r.json();
 }
+
+
+/* Splash auto-dismiss */
+(function() {
+  const sp = document.getElementById('splash');
+  if (!sp) return;
+  const hide = () => sp.classList.add('fade');
+  sp.addEventListener('click', hide);
+  setTimeout(hide, 3000);
+  setTimeout(() => sp.remove(), 4000);
+})();
 
 /* ============ State ============ */
 let queue = [], qi = -1;

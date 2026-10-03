@@ -619,6 +619,17 @@ def playlist_remove():
     return jsonify({"ok": True})
 
 
+@app.route("/api/playlist/delete", methods=["POST"])
+def playlist_delete():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    pls = _get_playlists()
+    if name in pls:
+        del pls[name]
+        _save_json_file(PLAYLISTS_FILE, pls)
+    return jsonify({"ok": True})
+
+
 # ---------------- Liked ----------------
 @app.route("/api/liked")
 def liked_get():

@@ -1,14 +1,18 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>MusicDost</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-  :root { --bg: #121212; --card: #1e1e1e; --card2: #262626; --accent: #1db954; --text: #f5f5f5; --muted: #9a9a9a; --danger: #ff6b6b; }
-  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; min-height: 100vh; }
+  :root { --bg: #0e0e0e; --card: #1a1a1a; --card2: #262626; --accent: #1db954; --accent-hi: #1ed760;
+    --text: #f5f5f5; --muted: #a3a3a3; --danger: #ff6b6b; --line: #262626; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    min-height: 100vh; line-height: 1.4; -webkit-font-smoothing: antialiased; }
   .hidden { display: none !important; }
+  button { font-family: inherit; transition: transform .15s ease, filter .15s ease, background-color .2s ease, color .2s ease; }
+  button:active { transform: scale(0.96); }
 
   /* Code gate */
   #gate { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
@@ -21,57 +25,83 @@
   #gateErr { color: var(--danger); margin-top: 12px; min-height: 20px; }
 
   /* Tabs */
-  .tab { padding: 12px 16px 150px; min-height: 100vh; }
-  .tab h2 { font-size: 20px; margin: 16px 0 10px; }
-  .tab h3 { font-size: 16px; margin: 18px 0 8px; color: var(--text); }
-  .pageTitle { font-size: 24px; font-weight: 800; margin: 4px 0 12px; }
-  .greetcard { background: linear-gradient(135deg, #1db954 0%, #0d7a34 60%, #0a5c28 100%);
-    border-radius: 18px; padding: 20px 18px; margin: 4px 0 12px; }
-  .greetcard .g1 { font-size: 24px; font-weight: 800; color: #fff; }
-  .greetcard .g2 { font-size: 14px; color: rgba(255,255,255,0.85); margin-top: 2px; }
-  .quickpills { display: flex; gap: 10px; margin: 0 0 14px; }
-  .quickpills .pillbtn { flex: 1; font-size: 13px; padding: 12px 6px; }
+  .tab { padding: 16px 16px 160px; min-height: 100vh; }
+  .tab h2 { font-size: 18px; font-weight: 700; line-height: 1.4; margin: 24px 0 12px; letter-spacing: -0.2px; }
+  .tab h3 { font-size: 16px; font-weight: 700; line-height: 1.4; margin: 24px 0 10px; }
+  .pageTitle { font-size: 26px; font-weight: 800; letter-spacing: -0.5px; line-height: 1.3; margin: 8px 0 16px; }
+  .sechead { display: flex; align-items: center; justify-content: space-between; margin: 24px 0 4px; }
+  .sechead h2 { margin: 0; }
+  .greetcard { background: linear-gradient(135deg, #1ed760, #0d8a3e);
+    border-radius: 20px; padding: 20px; margin: 4px 0 16px;
+    box-shadow: 0 8px 24px rgba(30, 215, 96, 0.22); }
+  .greetcard .g1 { font-size: 26px; font-weight: 800; color: #fff; letter-spacing: -0.5px; line-height: 1.3; }
+  .greetcard .g2 { font-size: 14px; color: rgba(255,255,255,0.8); margin-top: 4px; }
+  .quickpills { display: flex; gap: 10px; margin: 0 0 20px; }
+  .quickpills .pillbtn { flex: 1; height: 44px; border-radius: 22px; font-size: 14px; font-weight: 600;
+    padding: 0 10px; display: flex; align-items: center; justify-content: center; gap: 6px; }
 
   /* Chips */
-  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 12px; scrollbar-width: none; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 14px; scrollbar-width: none; }
   .chips::-webkit-scrollbar { display: none; }
-  .chip { flex-shrink: 0; padding: 8px 16px; background: var(--card); border: 1px solid #333; border-radius: 20px;
-    color: var(--text); font-size: 14px; cursor: pointer; }
+  .chip { flex-shrink: 0; padding: 9px 18px; background: var(--card); border: 1px solid #2e2e2e; border-radius: 20px;
+    color: var(--text); font-size: 14px; font-weight: 600; cursor: pointer; }
   .chip.on { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
-  .chip.small { padding: 6px 12px; font-size: 13px; }
-  .trow { display: flex; gap: 12px; overflow-x: auto; padding: 8px 0 12px; scrollbar-width: none; }
+  .chip.small { padding: 7px 14px; font-size: 13px; }
+  /* Segmented control */
+  .seg { display: flex; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px; gap: 4px; margin: 4px 0 14px; }
+  .seg .chip { flex: 1; border: none; background: transparent; border-radius: 10px; text-align: center;
+    padding: 10px 8px; color: var(--muted); }
+  .seg .chip.on { background: var(--accent); color: #000; }
+  .trow { display: flex; gap: 12px; overflow-x: auto; padding: 8px 2px 16px; scrollbar-width: none; scroll-snap-type: x proximity; }
   .trow::-webkit-scrollbar { display: none; }
-  .tcard { flex-shrink: 0; width: 140px; background: var(--card); border-radius: 14px; padding: 10px; cursor: pointer; }
-  .tcard .cov { width: 120px; height: 120px; border-radius: 10px; background: var(--card2);
-    display: flex; align-items: center; justify-content: center; font-size: 52px; margin-bottom: 8px; position: relative; overflow: hidden; }
+  .tcard { flex-shrink: 0; width: 130px; background: var(--card); border-radius: 14px; padding: 0 0 10px;
+    cursor: pointer; scroll-snap-align: start; overflow: hidden; }
+  .tcard:active { transform: scale(0.96); }
+  .tcard .cov { width: 130px; height: 130px; border-radius: 14px; background: var(--card2);
+    display: flex; align-items: center; justify-content: center; font-size: 52px; margin-bottom: 10px; position: relative; overflow: hidden; }
   .tcard .covimg { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
-  .tcard .play { position: absolute; right: 8px; bottom: 8px; width: 38px; height: 38px; border-radius: 50%;
-    background: var(--accent); color: #000; border: none; font-size: 15px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center; }
-  .tcard .tt { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tcard .ta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tcard .play { position: absolute; right: 8px; bottom: 8px; width: 40px; height: 40px; border-radius: 50%;
+    background: var(--accent); color: #000; border: none; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 14px rgba(0,0,0,0.5); }
+  .tcard .tt { font-weight: 600; font-size: 14px; line-height: 1.35; padding: 0 10px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .tcard .ta { color: var(--muted); font-size: 12px; line-height: 1.35; padding: 2px 10px 0;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
   /* Search */
-  #searchRow { display: flex; gap: 8px; margin-bottom: 6px; }
-  #q { flex: 1; padding: 12px; font-size: 16px; background: var(--card); border: 1px solid #333; border-radius: 10px; color: var(--text); }
-  #searchBtn { padding: 12px 18px; background: var(--accent); border: none; border-radius: 10px; font-weight: 700; cursor: pointer; font-size: 16px; }
+  #searchRow { display: flex; gap: 8px; margin-bottom: 10px; }
+  #q { flex: 1; height: 48px; padding: 0 16px; font-size: 16px; background: var(--card); border: 1px solid #2e2e2e;
+    border-radius: 14px; color: var(--text); outline: none; }
+  #q::placeholder { color: var(--muted); }
+  #q:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29,185,84,0.25); }
+  #searchBtn { height: 48px; padding: 0 20px; background: var(--accent); border: none; border-radius: 14px;
+    font-weight: 700; cursor: pointer; font-size: 17px; color: #000; }
+  .linkrow { display: flex; gap: 8px; margin: 10px 0 4px; }
+  .linkrow input { flex: 1; height: 48px; padding: 0 16px; font-size: 15px; background: var(--card);
+    border: 1px solid #2e2e2e; border-radius: 14px; color: var(--text); outline: none; min-width: 0; }
+  .linkrow input::placeholder { color: var(--muted); }
+  .linkrow input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(29,185,84,0.25); }
+  .linkrow .pillbtn { height: 48px; border-radius: 14px; flex-shrink: 0; }
 
   /* Song rows */
-  .song { display: flex; align-items: center; gap: 8px; background: var(--card); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
-  .song .art { width: 44px; height: 44px; border-radius: 8px; background: var(--card2); display: flex; align-items: center;
+  .song { display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: 12px;
+    padding: 10px 12px; margin-bottom: 8px; }
+  .song:active { transform: scale(0.98); filter: brightness(1.18); }
+  .song .art { width: 48px; height: 48px; border-radius: 10px; background: var(--card2); display: flex; align-items: center;
     justify-content: center; font-size: 22px; flex-shrink: 0; }
-  .song .artimg { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex-shrink: 0; background: var(--card2); }
+  .song .artimg { width: 48px; height: 48px; border-radius: 10px; object-fit: cover; flex-shrink: 0; background: var(--card2); }
   .song .info { flex: 1; min-width: 0; }
-  .song .title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .song .meta { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song .title { font-weight: 600; font-size: 15px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song .meta { color: var(--muted); font-size: 13px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .song .flash { color: var(--accent); font-size: 13px; }
   .song .yt { background: #c00; color: #fff; font-size: 10px; padding: 1px 5px; border-radius: 3px; }
-  .iconbtn { border: none; background: none; font-size: 20px; cursor: pointer; padding: 6px; flex-shrink: 0; color: var(--text); }
-  .iconbtn:active { transform: scale(0.92); }
-  .btnround { border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 16px; cursor: pointer; flex-shrink: 0;
+  .iconbtn { border: none; background: none; font-size: 19px; cursor: pointer; padding: 0; flex-shrink: 0; color: var(--text);
+    min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; }
+  .iconbtn:active { transform: scale(0.9); background: var(--card2); }
+  .btnround { border: none; border-radius: 50%; width: 36px; height: 36px; font-size: 15px; cursor: pointer; flex-shrink: 0;
     background: var(--accent); color: #000; display: flex; align-items: center; justify-content: center; }
-  .btnround.ghost { background: #333; color: var(--text); }
-  #status, .status { text-align: center; color: var(--muted); padding: 20px; }
+  .btnround.ghost { background: var(--card2); color: var(--text); }
+  #status, .status { text-align: center; color: var(--muted); padding: 24px 16px; font-size: 14px; }
 
   /* Download progress */
   .dlitem { background: var(--card); border-radius: 12px; padding: 12px; margin-bottom: 8px; }
@@ -81,39 +111,58 @@
   .dlitem .pct { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
   /* Playlist cards */
-  .plcard { display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: 12px; padding: 14px; margin-bottom: 8px; cursor: pointer; }
-  .plcard .ic { font-size: 28px; }
-  .plcard .nm { font-weight: 700; font-size: 16px; }
-  .plcard .ct { color: var(--muted); font-size: 13px; }
-  .plcard .go { margin-left: auto; color: var(--muted); font-size: 20px; }
+  .plcard { display: flex; align-items: center; gap: 12px; background: var(--card); border-radius: 14px;
+    padding: 14px 16px; margin-bottom: 8px; cursor: pointer; }
+  .plcard:active { transform: scale(0.98); }
+  .plcard .ic { font-size: 28px; flex-shrink: 0; }
+  .plcard .nm { font-weight: 700; font-size: 16px; line-height: 1.4; }
+  .plcard .ct { color: var(--muted); font-size: 13px; line-height: 1.4; }
+  .plcard .go { margin-left: auto; color: var(--muted); font-size: 20px; flex-shrink: 0; }
+
+  /* Settings */
+  .setlabel { font-size: 13px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted);
+    font-weight: 600; margin: 24px 0 10px; }
+  .setcard { background: var(--card); border-radius: 14px; padding: 16px; margin-bottom: 10px; }
+  .setcard .nm { font-weight: 700; font-size: 16px; line-height: 1.4; }
+  .setcard .ct { color: var(--muted); font-size: 13px; line-height: 1.4; margin-top: 2px; }
+  .setrow { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .setrow .ic { font-size: 26px; flex-shrink: 0; }
+  .setrow .tx { flex: 1; min-width: 0; }
+  #trendToggle { display: inline-flex; align-items: center; justify-content: center; min-width: 58px; height: 34px;
+    border-radius: 17px; background: var(--card2); border: 1px solid #3a3a3a; font-size: 19px; flex-shrink: 0;
+    margin-left: auto; padding: 0 8px; }
 
   /* Buttons */
-  .bigbtn { display: block; width: 100%; padding: 13px; margin: 8px 0; background: var(--card); border: 1px dashed #444;
-    border-radius: 12px; color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; }
+  .bigbtn { display: block; width: 100%; padding: 14px; margin: 10px 0; background: var(--card); border: 1px dashed #444;
+    border-radius: 14px; color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; }
   .bigbtn.solid { background: var(--accent); border: none; color: #000; }
-  .linkbtn { background: none; border: none; color: var(--accent); font-size: 13px; cursor: pointer; padding: 4px; }
+  .linkbtn { background: none; border: none; color: var(--accent); font-size: 14px; font-weight: 600; cursor: pointer; padding: 6px 4px; }
   .pillbtn { background: var(--accent); border: none; color: #000; font-weight: 700; font-size: 14px;
-    padding: 10px 18px; border-radius: 24px; cursor: pointer; }
-  .pillbtn.ghost { background: var(--card2); color: var(--text); border: 1px solid #3a3a3a; }
-  .pillbtn:active { transform: scale(0.96); }
+    padding: 12px 20px; border-radius: 22px; cursor: pointer; }
+  .pillbtn.ghost { background: var(--card); color: var(--text); border: 1px solid #2e2e2e; }
+  .mx { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .mx .pillbtn { height: 44px; display: inline-flex; align-items: center; }
 
   /* Mini player */
-  #miniplayer { position: fixed; left: 8px; right: 8px; bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 30;
-    background: #232323; border: 1px solid #333; border-radius: 14px; padding: 8px 12px;
-    display: flex; align-items: center; gap: 10px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
-  #miniplayer .art { width: 42px; height: 42px; border-radius: 8px; background: var(--card2);
+  #miniplayer { position: fixed; left: 12px; right: 12px; bottom: calc(76px + env(safe-area-inset-bottom)); z-index: 30;
+    background: rgba(35,35,35,0.92); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border: 1px solid #2e2e2e; border-radius: 16px; padding: 10px 12px;
+    display: flex; align-items: center; gap: 12px; cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+  #miniplayer .art { width: 44px; height: 44px; border-radius: 10px; background: var(--card2);
     display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
   #miniplayer .info { flex: 1; min-width: 0; }
-  #miniplayer .t { font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #miniplayer .a { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #miniPP { width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--accent); font-size: 18px; cursor: pointer; flex-shrink: 0; }
+  #miniplayer .t { font-weight: 600; font-size: 14px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #miniplayer .a { color: var(--muted); font-size: 12px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #miniPP { width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--accent); font-size: 18px; color: #000; cursor: pointer; flex-shrink: 0; }
 
   /* Bottom nav */
-  #bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: #1a1a1a; border-top: 1px solid #2a2a2a;
-    display: flex; padding-bottom: env(safe-area-inset-bottom); }
+  #bottomnav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    background: rgba(18,18,18,0.88); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border-top: 1px solid #232323; display: flex; padding-bottom: env(safe-area-inset-bottom); }
   #bottomnav button { flex: 1; background: none; border: none; color: var(--muted); padding: 10px 0 8px; cursor: pointer;
-    display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; }
-  #bottomnav button .ic { font-size: 22px; }
+    display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; font-weight: 600; }
+  #bottomnav button:active { transform: none; }
+  #bottomnav button .ic { font-size: 24px; line-height: 1; }
   #bottomnav button.on { color: var(--accent); }
 
   /* Full player */
@@ -213,9 +262,9 @@
 <!-- Code gate: pehla page -->
 <div id="gate">
   <h1>🎵 MusicDost</h1>
-  <p>Code daalo taaki andar ja sako</p>
+  <p>Enter your code to continue</p>
   <input id="codeInput" type="password" inputmode="text" placeholder="Enter code" autocomplete="off">
-  <button id="codeBtn">Unlock Jao</button>
+  <button id="codeBtn">Unlock</button>
   <div id="gateErr"></div>
 </div>
 
@@ -235,8 +284,8 @@
     </div>
     <div class="chips" id="langChips"></div>
     <div id="trendWrap">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <h2 id="trendHead" style="margin-bottom:0;">🔥 Trending</h2>
+      <div class="sechead">
+        <h2 id="trendHead">🔥 Trending</h2>
         <button class="linkbtn" id="trendSeeAll" onclick="toggleTrendAll()">See All ›</button>
       </div>
       <div id="trendList"><div class="status">Loading… 🔥</div></div>
@@ -252,11 +301,9 @@
       <input id="q" placeholder="Search songs or artists…" autocomplete="off">
       <button id="searchBtn">🔍</button>
     </div>
-    <div class="mx" style="margin:10px 0;">
-      <div style="display:flex;gap:8px;">
-        <input id="linkUrl" placeholder="Paste link (YouTube, Spotify…)…" autocomplete="off" style="flex:1;">
-        <button id="linkBtn" class="pillbtn">⬇ Get</button>
-      </div>
+    <div class="linkrow">
+      <input id="linkUrl" placeholder="Paste link (YouTube, Spotify…)…" autocomplete="off">
+      <button id="linkBtn" class="pillbtn">⬇ Get</button>
     </div>
     <div id="histWrap">
       <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0;">
@@ -265,7 +312,7 @@
       </div>
       <div class="chips" id="histChips"></div>
     </div>
-    <div class="chips" id="searchModeChips" style="margin-top:8px;">
+    <div class="seg" id="searchModeChips">
       <button class="chip on" data-sm="songs">Songs</button>
       <button class="chip" data-sm="artists">Artists</button>
     </div>
@@ -276,9 +323,9 @@
   <main id="tab-downloads" class="tab hidden">
     <div class="pageTitle">⬇️ Downloads</div>
     <h3>In Progress</h3>
-    <div id="activeDl"><div class="status">Load ho raha hai…</div></div>
+    <div id="activeDl"><div class="status">Loading…</div></div>
     <h3>Completed</h3>
-    <div id="doneDl"><div class="status">Load ho raha hai…</div></div>
+    <div id="doneDl"><div class="status">Loading…</div></div>
   </main>
 
   <!-- LIBRARY -->
@@ -288,34 +335,37 @@
       <h3 style="margin-bottom:0;">❤️ Liked Songs</h3>
       <button class="linkbtn" onclick="shuffleLiked()" style="font-size:16px;">🔀 Shuffle</button>
     </div>
-    <div id="likedList"><div class="status">Load ho raha hai…</div></div>
+    <div id="likedList"><div class="status">Loading…</div></div>
     <h3>📝 Playlists</h3>
-    <button class="bigbtn" id="newPlBtn">➕ Nayi Playlist Banao</button>
-    <div id="plList"><div class="status">Load ho raha hai…</div></div>
+    <button class="bigbtn" id="newPlBtn">➕ New Playlist</button>
+    <div id="plList"><div class="status">Loading…</div></div>
     <h3>📱 On This Device</h3>
-    <div id="phoneList"><div class="status">Load ho raha hai…</div></div>
+    <div id="phoneList"><div class="status">Loading…</div></div>
   </main>
 
   <!-- SETTINGS -->
   <main id="tab-settings" class="tab hidden">
     <div class="pageTitle">⚙️ Settings</div>
-    <div class="plcard" style="cursor:default;flex-direction:column;align-items:stretch;gap:10px;">
+    <div class="setlabel">Playback</div>
+    <div class="setcard">
       <div class="nm">Music Provider</div>
       <div class="ct">Choose your preferred source</div>
-      <div class="chips" id="provChips" style="padding:0;">
+      <div class="seg" id="provChips" style="margin:12px 0 0;">
         <button class="chip" data-prov="auto">Auto</button>
         <button class="chip" data-prov="jiosaavn">JioSaavn</button>
         <button class="chip" data-prov="youtube">YouTube</button>
       </div>
     </div>
-    <div class="plcard" style="cursor:default;" onclick="toggleTrendPref()">
+    <div class="setlabel">Appearance</div>
+    <div class="setcard setrow" onclick="toggleTrendPref()">
       <span class="ic">🔥</span>
-      <span><div class="nm">Trending Section</div><div class="ct">Show trending on home</div></span>
-      <span class="go" id="trendToggle">✅</span>
+      <span class="tx"><div class="nm">Trending Section</div><div class="ct">Show trending on home</div></span>
+      <span id="trendToggle">✅</span>
     </div>
-    <div class="plcard" style="cursor:default;">
+    <div class="setlabel">About</div>
+    <div class="setcard setrow">
       <span class="ic">ℹ️</span>
-      <span><div class="nm">Version</div><div class="ct">MusicDost v2.0</div></span>
+      <span class="tx"><div class="nm">Version</div><div class="ct">MusicDost v2.0</div></span>
     </div>
   </main>
 
@@ -450,7 +500,7 @@ async function verify() {
   try {
     const r = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
     if (r.ok) { gate.classList.add('hidden'); app.classList.remove('hidden'); boot(); }
-    else $('gateErr').textContent = 'Galat code 😅';
+    else $('gateErr').textContent = 'Wrong code 😅';
   } catch (e) { $('gateErr').textContent = "Can't reach the server"; }
   $('codeInput').value = '';
 }
@@ -644,7 +694,7 @@ function renderFpQueue() {
   $('fpQueueList').innerHTML = queue.map((s, i) =>
     `<div class="qitem${i === qi ? ' cur' : ''}" onclick="jumpQueue(${i})">
        <span class="n">${i + 1}</span><span class="t">${esc(s.title)} — ${esc(s.artist)}</span>
-     </div>`).join('') || '<div class="status">Queue khaali hai</div>';
+     </div>`).join('') || '<div class="status">Queue is empty</div>';
 }
 window.jumpQueue = i => { qi = i; playCurrent(); };
 
@@ -819,7 +869,7 @@ function renderHistChips() {
   const h = loadJSON('md_history', []);
   $('histChips').innerHTML = h.length
     ? h.map(q => `<button class="chip small" onclick="histSearch(${JSON.stringify(q).replace(/"/g, '&quot;')})">${esc(q)}</button>`).join('')
-    : '<span style="color:var(--muted);font-size:13px;">Koi history nahi</span>';
+    : '<span style="color:var(--muted);font-size:13px;">No recent searches</span>';
 }
 window.histSearch = q => { $('q').value = q; doSearch(); };
 let searching = false;
@@ -897,7 +947,7 @@ function renderDownloads() {
   // Active
   const act = bridgeGet('getActiveDownloads');
   if (act === null) {
-    $('activeDl').innerHTML = '<div class="status">Active downloads sirf app me dikhenge 📱</div>';
+    $('activeDl').innerHTML = '<div class="status">Active downloads appear in the app 📱</div>';
   } else if (!act.length) {
     $('activeDl').innerHTML = '<div class="status">No active downloads</div>';
   } else {
@@ -912,7 +962,7 @@ function renderDownloads() {
   // Done
   const done = bridgeGet('listDownloads');
   if (done === null) {
-    $('doneDl').innerHTML = '<div class="status">Downloaded files sirf app me dikhengi 📱</div>';
+    $('doneDl').innerHTML = '<div class="status">Downloaded files appear in the app 📱</div>';
   } else if (!done.length) {
     $('doneDl').innerHTML = '<div class="status">Nothing downloaded yet</div>';
   } else {
@@ -938,7 +988,7 @@ window.shuffleLiked = async () => {
   } catch (e) {}
 };
 async function renderLiked() {
-  $('likedList').innerHTML = '<div class="status">Load ho raha hai…</div>';
+  $('likedList').innerHTML = '<div class="status">Loading…</div>';
   try {
     const d = await apiGet('/api/liked');
     const arr = d.songs || [];
@@ -955,7 +1005,7 @@ async function renderPlaylists() {
     const d = await apiGet('/api/playlists');
     const pls = d.playlists || [];
     $('plList').innerHTML =
-      `<div class="mx" style="margin-bottom:8px;display:flex;gap:8px;">
+      `<div class="mx">
          <button class="pillbtn ghost" onclick="importShared()">📥 Import Shared</button>
        </div>` +
       (pls.length ? pls.map((p, i) =>
@@ -987,11 +1037,11 @@ window.openPlaylist = async name => {
     $('plList').innerHTML =
       `<button class="linkbtn" onclick="renderPlaylists()">‹ Back</button>
        <h3 style="margin-top:4px;">📝 ${esc(name)} (${arr.length})</h3>
-       ${arr.length ? `<div class="mx" style="margin-bottom:8px;">
+       ${arr.length ? `<div class="mx">
          <button class="pillbtn" onclick="dlAll('${id}')">⬇ Download All (${arr.length})</button>
          <button class="pillbtn ghost" id="selBtn" onclick="toggleSel('${id}')">☑ Select</button>
          <button class="pillbtn ghost" onclick="sharePl(${qn})">🔗 Share</button>
-       </div><div id="selBar" class="hidden mx" style="margin-bottom:8px;">
+       </div><div id="selBar" class="hidden mx">
          <button class="pillbtn" id="dlSelBtn" onclick="dlSelected('${id}')">⬇ Download Selected (0)</button>
        </div>` : ''}` +
       (arr.length ? arr.map((s, i) => songRow(s, id, i, { remove: `plRemove(${qn},'${id}',${i})`, selBox: true })).join('')
@@ -1054,7 +1104,7 @@ $('newPlBtn').onclick = async () => {
 function renderPhone() {
   const files = bridgeGet('listDownloads');
   if (files === null) {
-    $('phoneList').innerHTML = '<div class="status">On this device sirf app me dikhenge 📱</div>';
+    $('phoneList').innerHTML = '<div class="status">On-device songs appear in the app 📱</div>';
   } else if (!files.length) {
     $('phoneList').innerHTML = '<div class="status">No songs on this device</div>';
   } else {
@@ -1074,14 +1124,14 @@ function openPlPicker(s) {
   loadPlModalList();
 }
 async function loadPlModalList() {
-  $('plmodalList').innerHTML = '<div class="status">Load ho raha hai…</div>';
+  $('plmodalList').innerHTML = '<div class="status">Loading…</div>';
   try {
     const d = await apiGet('/api/playlists');
     const pls = d.playlists || [];
     $('plmodalList').innerHTML = pls.length ? pls.map(p =>
       `<div class="mrow" onclick="plPickAdd(${JSON.stringify(p.name).replace(/"/g, '&quot;')})">
          <span>📝</span><span>${esc(p.name)}</span><span style="color:var(--muted);font-size:12px;">${p.count || 0}</span></div>`).join('')
-      : '<div class="status">Koi playlist nahi — upar se nayi banao</div>';
+      : '<div class="status">No playlists yet — create one above</div>';
   } catch (e) { $('plmodalList').innerHTML = '<div class="status">Could\'t load 😅</div>'; }
 }
 window.plPickAdd = async name => {

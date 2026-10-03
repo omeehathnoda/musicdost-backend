@@ -499,11 +499,40 @@ async function verify() {
   $('gateErr').textContent = '';
   try {
     const r = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
-    if (r.ok) { gate.classList.add('hidden'); app.classList.remove('hidden'); boot(); }
+    if (r.ok) {
+      // App me code save karo (dobara na mange)
+      try {
+        if (window.MusicDost && typeof window.MusicDost.saveAuthCode === 'function') {
+          window.MusicDost.saveAuthCode(code);
+        }
+      } catch (e) {}
+      gate.classList.add('hidden'); app.classList.remove('hidden'); boot();
+    }
     else $('gateErr').textContent = 'Wrong code 😅';
   } catch (e) { $('gateErr').textContent = "Can't reach the server"; }
   $('codeInput').value = '';
 }
+
+// App start par auto-login (saved code se)
+async function tryAutoLogin() {
+  try {
+    if (window.MusicDost && typeof window.MusicDost.getAuthCode === 'function') {
+      const saved = window.MusicDost.getAuthCode();
+      if (saved) {
+        const r = await fetch('/api/verify', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: saved }) });
+        if (r.ok) {
+          gate.classList.add('hidden'); app.classList.remove('hidden'); boot();
+          return true;
+        }
+      }
+    }
+  } catch (e) {}
+  return false;
+}
+// Page load par try karo
+setTimeout(tryAutoLogin, 500);
 
 function renderGreeting() {
   const h = new Date().getHours();

@@ -82,6 +82,29 @@ def safe_key(key):
     return s[:120]
 
 
+TG_CACHE_FILE = os.path.join(BASE, "tg_cache.json")
+_tg_cache = None
+
+def tg_cache_lookup(title, artist):
+    """Telegram channel me file_id dhoondo. Returns file_id or None."""
+    global _tg_cache
+    if _tg_cache is None:
+        _tg_cache = _load_json_file(TG_CACHE_FILE, {})
+    key = (title + "|" + artist).lower()
+    if key in _tg_cache:
+        return _tg_cache[key]
+    # Smart match: title similar ho to bhi chalega
+    import re
+    def norm(s):
+        return re.sub(r"[^a-z0-9 ]", "", s.lower()).strip()
+    nt, na = norm(title), norm(artist)
+    for k, fid in _tg_cache.items():
+        kt, ka = k.split("|", 1) if "|" in k else (k, "")
+        if norm(kt) == nt and (not na or na in norm(ka) or norm(ka) in na):
+            return fid
+    return None
+
+
 def tg_download_file(file_id, dest_path):
     """Telegram getFile -> download. Needs TG_BOT_TOKEN."""
     if not TG_BOT_TOKEN:
@@ -142,31 +165,41 @@ def ensure_media(title, artist, ytid=None):
             pass
         return None, "not_found"
 
-    # 1. JioSaavn
+    # 1. JioSaavn (agar throttle nahi hai)
+    jio_throttled = not dl_engine.jiosaavn_usable()
+    if not jio_throttled:
+        try:
+            hits = dl_engine.jiosaavn_search(f"{title} {artist}", n=5)
+            hit = None
+            for h in hits:
+                if dl_engine.title_matches(f"{title} {artist}",
+                                           h.get("title", ""), h.get("artist", "")):
+                    hit = h
+                    break
+            if hit:
+                jp, _ = dl_engine.jiosaavn_download(
+                    hit["enc"], tmpdir, title=title, artist=artist,
+                    image=hit.get("image"),
+                    expected_duration=hit.get("duration"))
+                if jp and os.path.exists(jp):
+                    try:
+                        os.replace(jp, path)
+                    except OSError:
+                        import shutil
+                        shutil.copy(jp, path)
+                    return path, None
+        except Exception:
+            pass
+
+    # 2. Telegram cache (JioSaavn throttle ho ya fail ho jaye)
     try:
-        hits = dl_engine.jiosaavn_search(f"{title} {artist}", n=5)
-        hit = None
-        for h in hits:
-            if dl_engine.title_matches(f"{title} {artist}",
-                                       h.get("title", ""), h.get("artist", "")):
-                hit = h
-                break
-        if hit:
-            jp, _ = dl_engine.jiosaavn_download(
-                hit["enc"], tmpdir, title=title, artist=artist,
-                image=hit.get("image"),
-                expected_duration=hit.get("duration"))
-            if jp and os.path.exists(jp):
-                try:
-                    os.replace(jp, path)
-                except OSError:
-                    import shutil
-                    shutil.copy(jp, path)
-                return path, None
+        fid = tg_cache_lookup(title, artist)
+        if fid and tg_download_file(fid, path):
+            return path, None
     except Exception:
         pass
 
-    # 2. YouTube fallback
+    # 3. YouTube fallback
     try:
         pick = dl_engine.yt_best_pick(f"{title} {artist} song")
         if not pick:

@@ -32,6 +32,36 @@ MEDIA_DIR = os.environ.get("MEDIA_DIR", os.path.join(
 SECRET_KEY = os.environ.get("SECRET_KEY", os.urandom(32).hex())
 BASE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE, "web")
+DATA_DIR = os.environ.get("DATA_DIR", BASE)
+PLAYLISTS_FILE = os.path.join(DATA_DIR, "playlists.json")
+LIKED_FILE = os.path.join(DATA_DIR, "liked.json")
+
+# Trending charts (JioSaavn playlist IDs, bot wale hi)
+TREND_CHARTS = {
+    "hindi": ("Hindi Top 50", "1134543272"),
+    "english": ("English Top 50", "itunes:us"),  # iTunes via dl_engine
+    "punjabi": ("Punjabi Top 50", "1134543511"),
+    "haryanvi": ("Haryanvi Top 50", "1134770917"),
+    "bhojpuri": ("Bhojpuri Top 50", "1134768973"),
+    "bhakti": ("Bhakti Bhajan", "1296588511"),
+}
+_trend_cache = {}
+
+
+def _load_json_file(path, default):
+    try:
+        with open(path) as f:
+            d = json.load(f)
+            return d if isinstance(d, type(default)) else default
+    except (OSError, ValueError):
+        return default
+
+
+def _save_json_file(path, data):
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
 
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
@@ -254,6 +284,123 @@ def web_static(p):
     if ".." in p or p.startswith("/"):
         return jsonify({"error": "not found"}), 404
     return send_from_directory(WEB_DIR, p)
+
+
+# ---------------- Trending ----------------
+@app.route("/api/trending")
+def trending():
+    lang = (request.args.get("lang") or "hindi").lower()
+    if lang not in TREND_CHARTS:
+        return jsonify({"error": "galat language"}), 400
+    import time
+    now = time.time()
+    c = _trend_cache.get(lang)
+    if c and now - c["at"] < 6 * 3600:
+        return jsonify({"songs": c["songs"], "name": TREND_CHARTS[lang][0]})
+    name, cid = TREND_CHARTS[lang]
+    try:
+        if cid.startswith("itunes:"):
+            songs = dl_engine.itunes_chart(cid.split(":")[1])
+        else:
+            songs = dl_engine.jiosaavn_chart(cid, n=50)
+    except Exception:
+        songs = []
+    out = [{"title": s.get("title", ""), "artist": s.get("artist", ""),
+            "duration": 0} for s in (songs or [])[:50]]
+    if out:
+        _trend_cache[lang] = {"at": now, "songs": out}
+    elif c:
+        return jsonify({"songs": c["songs"], "name": name})
+    return jsonify({"songs": out, "name": name})
+
+
+# ---------------- Playlists ----------------
+def _get_playlists():
+    return _load_json_file(PLAYLISTS_FILE, {})
+
+
+@app.route("/api/playlists")
+def playlists():
+    pls = _get_playlists()
+    return jsonify({"playlists": [
+        {"name": n, "count": len(s)} for n, s in pls.items()]})
+
+
+@app.route("/api/playlists", methods=["POST"])
+def playlist_create():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()[:50]
+    if not name:
+        return jsonify({"error": "naam do"}), 400
+    pls = _get_playlists()
+    if name not in pls:
+        pls[name] = []
+        _save_json_file(PLAYLISTS_FILE, pls)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/playlist")
+def playlist_get():
+    name = request.args.get("name", "")
+    pls = _get_playlists()
+    return jsonify({"songs": pls.get(name, [])})
+
+
+@app.route("/api/playlist/add", methods=["POST"])
+def playlist_add():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    title = (data.get("title") or "").strip()
+    artist = (data.get("artist") or "").strip()
+    if not name or not title:
+        return jsonify({"error": "naam/title chahiye"}), 400
+    pls = _get_playlists()
+    lst = pls.setdefault(name, [])
+    key = (title + "|" + artist).lower()
+    if not any((s.get("title", "") + "|" + s.get("artist", "")).lower() == key
+               for s in lst):
+        lst.append({"title": title, "artist": artist})
+        _save_json_file(PLAYLISTS_FILE, pls)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/playlist/remove", methods=["POST"])
+def playlist_remove():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    title = (data.get("title") or "").strip()
+    artist = (data.get("artist") or "").strip()
+    pls = _get_playlists()
+    if name in pls:
+        key = (title + "|" + artist).lower()
+        pls[name] = [s for s in pls[name]
+                     if (s.get("title", "") + "|" + s.get("artist", "")).lower() != key]
+        _save_json_file(PLAYLISTS_FILE, pls)
+    return jsonify({"ok": True})
+
+
+# ---------------- Liked ----------------
+@app.route("/api/liked")
+def liked_get():
+    return jsonify({"songs": _load_json_file(LIKED_FILE, [])})
+
+
+@app.route("/api/liked", methods=["POST"])
+def liked_toggle():
+    data = request.get_json(silent=True) or {}
+    title = (data.get("title") or "").strip()
+    artist = (data.get("artist") or "").strip()
+    like = bool(data.get("liked", True))
+    if not title:
+        return jsonify({"error": "title chahiye"}), 400
+    lst = _load_json_file(LIKED_FILE, [])
+    key = (title + "|" + artist).lower()
+    lst = [s for s in lst
+           if (s.get("title", "") + "|" + s.get("artist", "")).lower() != key]
+    if like:
+        lst.insert(0, {"title": title, "artist": artist})
+    _save_json_file(LIKED_FILE, lst)
+    return jsonify({"ok": True, "liked": like})
 
 
 if __name__ == "__main__":

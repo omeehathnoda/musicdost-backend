@@ -538,6 +538,9 @@ def trending():
     try:
         if cid.startswith("itunes:"):
             songs = dl_engine.itunes_chart(cid.split(":")[1])
+            # iTunes fail ho to JioSaavn English chart try karo
+            if not songs and lang == "english":
+                songs = dl_engine.jiosaavn_chart("1134543273", n=50)
         else:
             songs = dl_engine.jiosaavn_chart(cid, n=50)
     except Exception:

@@ -25,6 +25,12 @@
   .tab h2 { font-size: 20px; margin: 16px 0 10px; }
   .tab h3 { font-size: 16px; margin: 18px 0 8px; color: var(--text); }
   .pageTitle { font-size: 24px; font-weight: 800; margin: 4px 0 12px; }
+  .greetcard { background: linear-gradient(135deg, #1db954 0%, #0d7a34 60%, #0a5c28 100%);
+    border-radius: 18px; padding: 20px 18px; margin: 4px 0 12px; }
+  .greetcard .g1 { font-size: 24px; font-weight: 800; color: #fff; }
+  .greetcard .g2 { font-size: 14px; color: rgba(255,255,255,0.85); margin-top: 2px; }
+  .quickpills { display: flex; gap: 10px; margin: 0 0 14px; }
+  .quickpills .pillbtn { flex: 1; font-size: 13px; padding: 12px 6px; }
 
   /* Chips */
   .chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 12px; scrollbar-width: none; }
@@ -33,6 +39,16 @@
     color: var(--text); font-size: 14px; cursor: pointer; }
   .chip.on { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
   .chip.small { padding: 6px 12px; font-size: 13px; }
+  .trow { display: flex; gap: 12px; overflow-x: auto; padding: 8px 0 12px; scrollbar-width: none; }
+  .trow::-webkit-scrollbar { display: none; }
+  .tcard { flex-shrink: 0; width: 140px; background: var(--card); border-radius: 14px; padding: 10px; cursor: pointer; }
+  .tcard .cov { width: 120px; height: 120px; border-radius: 10px; background: var(--card2);
+    display: flex; align-items: center; justify-content: center; font-size: 52px; margin-bottom: 8px; position: relative; }
+  .tcard .play { position: absolute; right: 8px; bottom: 8px; width: 38px; height: 38px; border-radius: 50%;
+    background: var(--accent); color: #000; border: none; font-size: 15px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; }
+  .tcard .tt { font-weight: 700; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tcard .ta { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* Search */
   #searchRow { display: flex; gap: 8px; margin-bottom: 6px; }
@@ -74,6 +90,10 @@
     border-radius: 12px; color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; }
   .bigbtn.solid { background: var(--accent); border: none; color: #000; }
   .linkbtn { background: none; border: none; color: var(--accent); font-size: 13px; cursor: pointer; padding: 4px; }
+  .pillbtn { background: var(--accent); border: none; color: #000; font-weight: 700; font-size: 14px;
+    padding: 10px 18px; border-radius: 24px; cursor: pointer; }
+  .pillbtn.ghost { background: var(--card2); color: var(--text); border: 1px solid #3a3a3a; }
+  .pillbtn:active { transform: scale(0.96); }
 
   /* Mini player */
   #miniplayer { position: fixed; left: 8px; right: 8px; bottom: calc(70px + env(safe-area-inset-bottom)); z-index: 30;
@@ -149,10 +169,23 @@
 
   <!-- HOME -->
   <main id="tab-home" class="tab">
-    <div class="pageTitle">🎵 MusicDost</div>
+    <div class="greetcard">
+      <div class="g1" id="greetTitle">🎵 MusicDost</div>
+      <div class="g2">Ready to explore?</div>
+    </div>
+    <div class="quickpills">
+      <button class="pillbtn" onclick="shuffleLiked()">🔀 Shuffle Liked</button>
+      <button class="pillbtn ghost" onclick="showTab('downloads')">⬇ Downloads</button>
+      <button class="pillbtn ghost" onclick="showTab('library')">📁 Library</button>
+    </div>
     <div class="chips" id="langChips"></div>
-    <h2 id="trendHead">🔥 Trending</h2>
-    <div id="trendList"><div class="status">Load ho raha hai…</div></div>
+    <div id="trendWrap">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <h2 id="trendHead" style="margin-bottom:0;">🔥 Trending</h2>
+        <button class="linkbtn" id="trendSeeAll" onclick="toggleTrendAll()">See All ›</button>
+      </div>
+      <div id="trendList"><div class="status">Loading… 🔥</div></div>
+    </div>
     <h2>🕐 Recently Played</h2>
     <div id="recentList"><div class="status">Nothing played yet</div></div>
   </main>
@@ -177,6 +210,10 @@
       </div>
       <div class="chips" id="histChips"></div>
     </div>
+    <div class="chips" id="searchModeChips" style="margin-top:8px;">
+      <button class="chip on" data-sm="songs">Songs</button>
+      <button class="chip" data-sm="artists">Artists</button>
+    </div>
     <div id="results"><div class="status">Search above 🎶</div></div>
   </main>
 
@@ -192,13 +229,39 @@
   <!-- LIBRARY -->
   <main id="tab-library" class="tab hidden">
     <div class="pageTitle">📁 Library</div>
-    <h3>❤️ Liked Songs</h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <h3 style="margin-bottom:0;">❤️ Liked Songs</h3>
+      <button class="linkbtn" onclick="shuffleLiked()" style="font-size:16px;">🔀 Shuffle</button>
+    </div>
     <div id="likedList"><div class="status">Load ho raha hai…</div></div>
     <h3>📝 Playlists</h3>
     <button class="bigbtn" id="newPlBtn">➕ Nayi Playlist Banao</button>
     <div id="plList"><div class="status">Load ho raha hai…</div></div>
     <h3>📱 On This Device</h3>
     <div id="phoneList"><div class="status">Load ho raha hai…</div></div>
+  </main>
+
+  <!-- SETTINGS -->
+  <main id="tab-settings" class="tab hidden">
+    <div class="pageTitle">⚙️ Settings</div>
+    <div class="plcard" style="cursor:default;flex-direction:column;align-items:stretch;gap:10px;">
+      <div class="nm">Music Provider</div>
+      <div class="ct">Choose your preferred source</div>
+      <div class="chips" id="provChips" style="padding:0;">
+        <button class="chip" data-prov="auto">Auto</button>
+        <button class="chip" data-prov="jiosaavn">JioSaavn</button>
+        <button class="chip" data-prov="youtube">YouTube</button>
+      </div>
+    </div>
+    <div class="plcard" style="cursor:default;" onclick="toggleTrendPref()">
+      <span class="ic">🔥</span>
+      <span><div class="nm">Trending Section</div><div class="ct">Show trending on home</div></span>
+      <span class="go" id="trendToggle">✅</span>
+    </div>
+    <div class="plcard" style="cursor:default;">
+      <span class="ic">ℹ️</span>
+      <span><div class="nm">Version</div><div class="ct">MusicDost v2.0</div></span>
+    </div>
   </main>
 
   <!-- Mini player -->
@@ -214,6 +277,7 @@
     <button data-tab="search"><span class="ic">🔍</span>Search</button>
     <button data-tab="downloads"><span class="ic">⬇️</span>Downloads</button>
     <button data-tab="library"><span class="ic">📁</span>Library</button>
+    <button data-tab="settings"><span class="ic">⚙️</span>Settings</button>
   </nav>
 
   <!-- Full player -->
@@ -290,6 +354,7 @@ let currentTab = 'home';
 const listReg = {}; let listSeq = 0;
 function regList(arr) { const id = 'L' + (++listSeq); listReg[id] = arr; return id; }
 function getSong(listId, idx) { const a = listReg[listId]; return a ? a[idx] : null; }
+function getList(listId) { return listReg[listId] || []; }
 
 function loadJSON(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
 function saveJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
@@ -320,13 +385,20 @@ async function verify() {
     const r = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
     if (r.ok) { gate.classList.add('hidden'); app.classList.remove('hidden'); boot(); }
     else $('gateErr').textContent = 'Galat code 😅';
-  } catch (e) { $('gateErr').textContent = 'Can't reach the server'; }
+  } catch (e) { $('gateErr').textContent = "Can't reach the server"; }
   $('codeInput').value = '';
 }
 
+function renderGreeting() {
+  const h = new Date().getHours();
+  const g = h < 12 ? 'Good Morning' : h < 17 ? 'Good Afternoon' : 'Good Evening';
+  $('greetTitle').textContent = g;
+}
 function boot() {
+  renderGreeting();
   renderLangChips();
   renderHistChips();
+  applyTrendVisibility();
   loadLiked().then(() => { loadTrending('hindi'); });
   renderRecent();
   showTab('home');
@@ -339,7 +411,8 @@ document.querySelectorAll('#bottomnav button').forEach(b => {
 function showTab(t) {
   currentTab = t;
   document.querySelectorAll('#bottomnav button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
-  ['home', 'search', 'downloads', 'library'].forEach(x => $('tab-' + x).classList.toggle('hidden', x !== t));
+  ['home', 'search', 'downloads', 'library', 'settings'].forEach(x => $('tab-' + x).classList.toggle('hidden', x !== t));
+  if (t === 'settings') renderSettings();
   if (t === 'downloads') renderDownloads();
   if (t === 'library') renderLibrary();
   if (t === 'home') renderRecent();
@@ -384,7 +457,7 @@ window.nativeOnState = function (state, duration) {
   } else if (state === 'error') {
     setPlayingUI(false);
     stopPoll();
-    $('miniT').textContent = 'Couldn't play this song 😅';
+    $('miniT').textContent = "Couldn't play this song 😅";
   }
 };
 window.nativeNext = function () { playNext(); };
@@ -402,7 +475,7 @@ function playCurrent() {
     try {
       window.MusicDost.playAudio(absStreamUrl(s), s.title || '', s.artist || '');
     } catch (e) {
-      $('miniT').textContent = 'Couldn't play this song 😅';
+      $('miniT').textContent = "Couldn't play this song 😅";
       setPlayingUI(false);
       return;
     }
@@ -591,15 +664,56 @@ function renderLangChips() {
 }
 window.setLang = l => { curLang = l; renderLangChips(); loadTrending(l); };
 async function loadTrending(lang) {
-  $('trendList').innerHTML = '<div class="status">Load ho raha hai… 🔥</div>';
+  trendAllShown = false;
+  const sa = $('trendSeeAll'); if (sa) sa.textContent = 'See All ›';
+  $('trendList').innerHTML = '<div class="status">Loading… 🔥</div>';
   try {
     const d = await apiGet('/api/trending?lang=' + encodeURIComponent(lang));
     $('trendHead').textContent = '🔥 ' + (d.name || 'Trending');
-    $('trendList').innerHTML = songListHTML(d.songs || []);
+    trendSongs = d.songs || [];
+    renderTrendCards();
   } catch (e) {
-    $('trendList').innerHTML = '<div class="status">Couldn't load 😅</div>';
+    $('trendList').innerHTML = '<div class="status">Couldn\'t load 😅</div>';
   }
 }
+let trendSongs = [], trendAllShown = false;
+function renderTrendCards() {
+  const id = regList(trendSongs);
+  $('trendList').innerHTML =
+    '<div class="trow">' + trendSongs.map((s, i) =>
+      `<div class="tcard" onclick="uiPlay('${id}',${i})">` +
+      `<div class="cov">🎵<button class="play" onclick="event.stopPropagation();uiPlay('${id}',${i})">▶</button></div>` +
+      `<div class="tt">${esc(s.title)}</div>` +
+      `<div class="ta">${esc(s.artist || '')}</div></div>`).join('') + '</div>';
+}
+window.toggleTrendAll = () => {
+  trendAllShown = !trendAllShown;
+  $('trendSeeAll').textContent = trendAllShown ? '‹ Show Less' : 'See All ›';
+  if (trendAllShown) $('trendList').innerHTML = songListHTML(trendSongs);
+  else renderTrendCards();
+};
+function applyTrendVisibility() {
+  const show = (localStorage.getItem('md_show_trend') || '1') === '1';
+  const w = $('trendWrap');
+  if (w) w.classList.toggle('hidden', !show);
+}
+function renderSettings() {
+  const prov = localStorage.getItem('md_provider') || 'auto';
+  document.querySelectorAll('#provChips .chip').forEach(c =>
+    c.classList.toggle('on', c.dataset.prov === prov));
+  const show = (localStorage.getItem('md_show_trend') || '1') === '1';
+  const tt = $('trendToggle');
+  if (tt) tt.textContent = show ? '✅' : '⬜';
+}
+document.querySelectorAll('#provChips .chip').forEach(c => {
+  c.onclick = () => { localStorage.setItem('md_provider', c.dataset.prov); renderSettings(); };
+});
+window.toggleTrendPref = () => {
+  const show = (localStorage.getItem('md_show_trend') || '1') === '1';
+  localStorage.setItem('md_show_trend', show ? '0' : '1');
+  renderSettings();
+  applyTrendVisibility();
+};
 function renderRecent() {
   const r = loadJSON('md_recent', []);
   $('recentList').innerHTML = r.length ? songListHTML(r, { menu: false }) : '<div class="status">Nothing played yet</div>';
@@ -631,6 +745,49 @@ function renderHistChips() {
 }
 window.histSearch = q => { $('q').value = q; doSearch(); };
 let searching = false;
+let searchMode = 'songs', lastResults = [];
+document.querySelectorAll('#searchModeChips .chip').forEach(c => {
+  c.onclick = () => {
+    searchMode = c.dataset.sm;
+    document.querySelectorAll('#searchModeChips .chip').forEach(x => x.classList.toggle('on', x === c));
+    renderSearchResults();
+  };
+});
+function applyProviderFilter(arr) {
+  const prov = localStorage.getItem('md_provider') || 'auto';
+  if (prov === 'youtube') {
+    const yt = arr.filter(s => s.ytid), rest = arr.filter(s => !s.ytid);
+    return yt.concat(rest);
+  }
+  if (prov === 'jiosaavn') return arr.filter(s => !s.ytid);
+  return arr;
+}
+function renderSearchResults() {
+  const arr = applyProviderFilter(lastResults);
+  if (searchMode === 'artists') {
+    const groups = {};
+    arr.forEach(s => { const a = (s.artist || 'Unknown').trim(); (groups[a] = groups[a] || []).push(s); });
+    const names = Object.keys(groups).sort();
+    $('results').innerHTML = names.length ? names.map(a => {
+      const id = regList(groups[a]);
+      return `<div class="plcard" onclick="toggleArtistSongs('${id}')">` +
+        `<span class="ic">🎤</span>` +
+        `<span><div class="nm">${esc(a)}</div><div class="ct">${groups[a].length} songs</div></span>` +
+        `<span class="go">›</span></div>` +
+        `<div id="ag-${id}" class="hidden"></div>`;
+    }).join('') : '<div class="status">No results found</div>';
+  } else {
+    $('results').innerHTML = songListHTML(arr);
+  }
+}
+window.toggleArtistSongs = id => {
+  const el = $('ag-' + id);
+  if (!el) return;
+  if (el.classList.contains('hidden')) {
+    el.innerHTML = (getList(id) || []).map((s, i) => songRow(s, id, i, {})).join('');
+    el.classList.remove('hidden');
+  } else el.classList.add('hidden');
+};
 async function doSearch() {
   const q = $('q').value.trim();
   if (!q || searching) return;
@@ -639,7 +796,8 @@ async function doSearch() {
   $('results').innerHTML = '<div class="status">Searching… 🔍</div>';
   try {
     const d = await apiGet('/api/search?q=' + encodeURIComponent(q));
-    $('results').innerHTML = songListHTML(d.results || []);
+    lastResults = d.results || [];
+    renderSearchResults();
   } catch (e) {
     $('results').innerHTML = '<div class="status">Something went wrong 😅</div>';
   }
@@ -689,6 +847,18 @@ function renderDownloads() {
 /* ============ LIBRARY ============ */
 function renderLibrary() { renderLiked(); renderPlaylists(); renderPhone(); }
 
+window.shuffleLiked = async () => {
+  try {
+    const d = await apiGet('/api/liked');
+    const arr = (d.songs || []).slice();
+    if (!arr.length) { alert('No liked songs yet \uD83E\uDD0D'); return; }
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    playQueue(arr, 0);
+  } catch (e) {}
+};
 async function renderLiked() {
   $('likedList').innerHTML = '<div class="status">Load ho raha hai…</div>';
   try {
@@ -698,7 +868,7 @@ async function renderLiked() {
     likedSet = new Set(arr.map(skey));
     updateLikeUI();
     $('likedList').innerHTML = arr.length ? songListHTML(arr, { like: false }) : '<div class="status">No liked songs yet 🤍</div>';
-  } catch (e) { $('likedList').innerHTML = '<div class="status">Couldn't load 😅</div>'; }
+  } catch (e) { $('likedList').innerHTML = '<div class="status">Could\'t load 😅</div>'; }
 }
 
 async function renderPlaylists() {
@@ -800,7 +970,7 @@ $('newPlBtn').onclick = async () => {
   try {
     await apiPost('/api/playlists', { name: name.trim() });
     renderPlaylists();
-  } catch (e) { alert('Couldn't create 😅'); }
+  } catch (e) { alert("Couldn't create 😅"); }
 };
 
 function renderPhone() {
@@ -834,7 +1004,7 @@ async function loadPlModalList() {
       `<div class="mrow" onclick="plPickAdd(${JSON.stringify(p.name).replace(/"/g, '&quot;')})">
          <span>📝</span><span>${esc(p.name)}</span><span style="color:var(--muted);font-size:12px;">${p.count || 0}</span></div>`).join('')
       : '<div class="status">Koi playlist nahi — upar se nayi banao</div>';
-  } catch (e) { $('plmodalList').innerHTML = '<div class="status">Couldn't load 😅</div>'; }
+  } catch (e) { $('plmodalList').innerHTML = '<div class="status">Could\'t load 😅</div>'; }
 }
 window.plPickAdd = async name => {
   if (!plPickSong) return;

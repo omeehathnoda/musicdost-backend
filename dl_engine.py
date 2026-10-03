@@ -168,8 +168,9 @@ def jiosaavn_chart(listid, n=50):
             artist = html.unescape((pa[0].get("name") or "").strip())
         if not title:
             continue
+        img = (s.get("image") or "").strip()
         out.append({"title": title, "artist": artist, "enc": enc,
-                    "duration": _mi_duration(mi)})
+                    "duration": _mi_duration(mi), "image": img})
     return out
 
 

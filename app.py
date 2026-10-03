@@ -325,6 +325,7 @@ def search():
         out.append({
             "key": key, "title": t, "artist": a,
             "duration": dur, "cached": cached,
+            "image": h.get("image", ""),
             "_score": relevance(t, a),
         })
     out.sort(key=lambda x: x["_score"], reverse=True)
@@ -350,6 +351,7 @@ def search():
                 out.append({
                     "key": key, "title": t, "artist": a,
                     "duration": dur, "cached": False,
+                    "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
                     "ytid": vid, "_score": 15,
                 })
         except Exception:
@@ -417,7 +419,7 @@ def trending():
     except Exception:
         songs = []
     out = [{"title": s.get("title", ""), "artist": s.get("artist", ""),
-            "duration": 0} for s in (songs or [])[:50]]
+            "duration": 0, "image": s.get("image", "")} for s in (songs or [])[:50]]
     if out:
         _trend_cache[lang] = {"at": now, "songs": out}
     elif c:

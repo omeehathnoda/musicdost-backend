@@ -387,6 +387,20 @@ def download():
     return send_range(path, download_name=f"{title} - {artist}")
 
 
+@app.route("/api/prepare")
+def prepare():
+    """File cache me taiyaar karo (DownloadManager se pehle)."""
+    title = (request.args.get("title") or "").strip()
+    artist = (request.args.get("artist") or "").strip()
+    ytid = (request.args.get("ytid") or "").strip() or None
+    if not title:
+        return jsonify({"error": "title chahiye"}), 400
+    path, err = ensure_media(title, artist, ytid=ytid)
+    if not path:
+        return jsonify({"error": err or "taiyaar nahi hua"}), 404
+    return jsonify({"ok": True})
+
+
 @app.route("/")
 def index():
     return send_from_directory(WEB_DIR, "index.html")

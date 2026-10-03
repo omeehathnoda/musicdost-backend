@@ -387,33 +387,62 @@ def search():
             "_score": relevance(t, a),
         })
     out.sort(key=lambda x: x["_score"], reverse=True)
-    # JioSaavn me kuch relevant nahi mila to YouTube se lao
-    best = out[0]["_score"] if out else 0
-    if best < 20:
-        try:
-            for v in dl_engine.yt_search(q + " song", n=5):
-                vid = v.get("id", "")
-                t = v.get("title", "") or "video"
-                a = v.get("uploader", "")
-                # duration "3:45" -> seconds
+    # YouTube results hamesha lao (bot wali smart scoring ke saath)
+    _JUNK = ("live", "reaction", "cover", "1 hour", "1hour", "loop",
+             "8d audio", "slowed", "sped up", "ringtone", "status",
+             "whatsapp", "dj remix", "mashup")
+    _GOOD = ("topic", "vevo", "official", "music", "records",
+             "t-series", "sony", "zee", "tips", "saregama")
+    try:
+        import re as _re
+        qwords = [w for w in _re.findall(r"[a-z0-9]+", q.lower())
+                  if len(w) >= 3 and w not in ("song", "the", "from", "with")]
+        for v in dl_engine.yt_search(q + " song", n=8):
+            vid = v.get("id", "")
+            t = v.get("title", "") or "video"
+            a = v.get("uploader", "")
+            tl, ul = t.lower(), (a or "").lower()
+            # Bot wali scoring
+            ys = 0
+            if any(j in tl for j in _JUNK):
+                ys -= 50
+            if any(g in ul for g in _GOOD):
+                ys += 10
+            if "official" in tl:
+                ys += 5
+            for w in qwords:
+                if w in tl:
+                    ys += 2
+            dur = 0
+            try:
+                parts = (v.get("duration") or "").split(":")
+                for p in parts:
+                    dur = dur * 60 + int(p)
+            except (ValueError, TypeError):
                 dur = 0
-                try:
-                    parts = (v.get("duration") or "").split(":")
-                    for p in parts:
-                        dur = dur * 60 + int(p)
-                except (ValueError, TypeError):
-                    dur = 0
-                if dur > 2700:  # 45 min se lamba skip
-                    continue
-                key = ("yt:" + vid).lower()
-                out.append({
-                    "key": key, "title": t, "artist": a,
-                    "duration": dur, "cached": False,
-                    "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                    "ytid": vid, "_score": 15,
-                })
-        except Exception:
-            pass
+            if dur > 2700:
+                continue
+            if 120 <= dur <= 480:
+                ys += 5
+            elif dur > 600:
+                ys -= 20
+            # Base score + smart scoring
+            score = 15 + ys
+            if score < 0:
+                continue
+            key = ("yt:" + vid).lower()
+            # Duplicate na ho
+            if any(x.get("ytid") == vid for x in out):
+                continue
+            out.append({
+                "key": key, "title": t, "artist": a,
+                "duration": dur, "cached": False,
+                "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                "ytid": vid, "_score": score,
+            })
+    except Exception:
+        pass
+    out.sort(key=lambda x: x["_score"], reverse=True)
     for x in out:
         del x["_score"]
     return jsonify({"results": out})

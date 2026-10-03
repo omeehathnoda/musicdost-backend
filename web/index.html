@@ -751,13 +751,8 @@ $('fpDl').onclick = () => { const s = queue[qi]; if (s) dlSongDirect(s); };
 $('fpPlAdd').onclick = () => { const s = queue[qi]; if (s) openPlPicker(s); };
 
 /* ============ Download ============ */
-async function dlSongDirect(s) {
+function dlSongDirect(s) {
   const rel = dlUrl(s), fname = fileName(s);
-  const prepUrl = '/api/prepare?title=' + encodeURIComponent(s.title) +
-    '&artist=' + encodeURIComponent(s.artist || '') +
-    (s.ytid ? '&ytid=' + encodeURIComponent(s.ytid) : '');
-  // Pehle server par file taiyaar karo (phir DownloadManager turant lega)
-  try { await fetch(prepUrl); } catch (e) {}
   if (window.MusicDost && typeof window.MusicDost.download === 'function') {
     try { window.MusicDost.download(location.origin + rel, fname); } catch (e) {}
   } else {

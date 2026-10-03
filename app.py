@@ -235,8 +235,32 @@ def search():
     q = (request.args.get("q") or "").strip()
     if not q:
         return jsonify({"results": []})
+
+    def relevance(title, artist):
+        """Query se kitna milta hai — zyada score = upar dikhega."""
+        import re
+        qt = re.sub(r"[^a-z0-9 ]", "", q.lower())
+        tt = re.sub(r"[^a-z0-9 ]", "", (title or "").lower())
+        qw = [w for w in qt.split() if len(w) > 1]
+        if not qw:
+            return 0
+        score = 0
+        # exact title match sabse upar
+        if qt == tt:
+            score += 100
+        # title query se shuru ho
+        if tt.startswith(qt):
+            score += 50
+        # kitne query words title me hain
+        hits = sum(1 for w in qw if w in tt)
+        score += hits * 10
+        # saare words mile to bonus
+        if hits == len(qw):
+            score += 20
+        return score
+
     out = []
-    for h in dl_engine.jiosaavn_search(q, n=8):
+    for h in dl_engine.jiosaavn_search(q, n=10):
         t, a = h.get("title", ""), h.get("artist", "")
         dur = h.get("duration")
         try:
@@ -250,7 +274,11 @@ def search():
         out.append({
             "key": key, "title": t, "artist": a,
             "duration": dur, "cached": cached,
+            "_score": relevance(t, a),
         })
+    out.sort(key=lambda x: x["_score"], reverse=True)
+    for x in out:
+        del x["_score"]
     return jsonify({"results": out})
 
 

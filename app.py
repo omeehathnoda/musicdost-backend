@@ -180,8 +180,9 @@ def ensure_media(title, artist, ytid=None):
     path = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
     if os.path.exists(path) and os.path.getsize(path) > 50 * 1024:
         return path, None
-    tmpdir = os.path.join(MEDIA_DIR, ".work")
-    os.makedirs(tmpdir, exist_ok=True)
+    # Har request ke liye alag tmpdir (concurrent downloads na takraye)
+    import tempfile
+    tmpdir = tempfile.mkdtemp(prefix="dl_", dir=MEDIA_DIR)
 
     # 0. Seedha YouTube video ID mila ho to wahi se
     if ytid:
@@ -248,7 +249,19 @@ def ensure_media(title, artist, ytid=None):
             except OSError:
                 import shutil
                 shutil.copy(yp, path)
+            # Temp dir saaf karo
+            try:
+                import shutil
+                shutil.rmtree(tmpdir, ignore_errors=True)
+            except Exception:
+                pass
             return path, None
+    except Exception:
+        pass
+    # Temp dir saaf karo (fail case me bhi)
+    try:
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
     except Exception:
         pass
     return None, "not_found"

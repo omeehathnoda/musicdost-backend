@@ -339,7 +339,51 @@ function showTab(t) {
   if (t === 'home') renderRecent();
 }
 
-/* ============ Player core ============ */
+/* ============ Player core (native bridge + web fallback) ============ */
+function hasNative() { try { return !!(window.MusicDost && window.MusicDost.playAudio); } catch (e) { return false; } }
+function absStreamUrl(s) { return location.origin + streamUrl(s); }
+
+let _pollTimer = null;
+function setPlayingUI(playing) {
+  $('miniPP').textContent = playing ? '⏸' : '▶';
+  $('fpPP').textContent = playing ? '⏸' : '▶';
+}
+function startPoll() {
+  stopPoll();
+  _pollTimer = setInterval(() => {
+    try {
+      if (!hasNative()) { stopPoll(); return; }
+      const pos = window.MusicDost.audioPosition() | 0;
+      const dur = window.MusicDost.audioDuration() | 0;
+      setPlayingUI(!!window.MusicDost.audioPlaying());
+      if (dur > 0) {
+        $('fpSeek').value = Math.floor(pos / dur * 1000);
+        $('fpCur').textContent = fmt(pos / 1000);
+        $('fpDur').textContent = fmt(dur / 1000);
+      }
+    } catch (e) {}
+  }, 500);
+}
+function stopPoll() { if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; } }
+
+// Native Android se callbacks (MediaPlayer events)
+window.nativeOnState = function (state, duration) {
+  if (state === 'playing') {
+    setPlayingUI(true);
+    startPoll();
+  } else if (state === 'ended') {
+    setPlayingUI(false);
+    stopPoll();
+    playNext();
+  } else if (state === 'error') {
+    setPlayingUI(false);
+    stopPoll();
+    $('miniT').textContent = 'Gaana nahi baj paya 😅';
+  }
+};
+window.nativeNext = function () { playNext(); };
+window.nativePrev = function () { playPrev(); };
+
 function playQueue(list, idx) {
   if (!list || !list.length) return;
   queue = list; qi = Math.max(0, idx || 0);
@@ -348,15 +392,24 @@ function playQueue(list, idx) {
 function playCurrent() {
   const s = queue[qi];
   if (!s) return;
-  audio.src = streamUrl(s);
-  audio.play().catch(() => {});
+  if (hasNative()) {
+    try {
+      window.MusicDost.playAudio(absStreamUrl(s), s.title || '', s.artist || '');
+    } catch (e) {
+      $('miniT').textContent = 'Gaana nahi baj paya 😅';
+      setPlayingUI(false);
+      return;
+    }
+  } else {
+    audio.src = streamUrl(s);
+    audio.play().catch(() => {});
+  }
   $('miniT').textContent = s.title || '—';
   $('miniA').textContent = s.artist || '';
   $('miniplayer').classList.remove('hidden');
-  $('miniPP').textContent = '⏸';
+  setPlayingUI(true);
   $('fpSong').textContent = s.title || '—';
   $('fpArtist').textContent = s.artist || '';
-  $('fpPP').textContent = '⏸';
   renderFpQueue();
   updateLikeUI();
   addRecent(s);
@@ -366,16 +419,44 @@ function playCurrent() {
 }
 function togglePlay() {
   if (!queue.length) return;
-  if (audio.paused) { audio.play().catch(() => {}); }
-  else { audio.pause(); }
+  if (hasNative()) {
+    try {
+      if (window.MusicDost.audioPlaying()) { window.MusicDost.pauseAudio(); setPlayingUI(false); }
+      else { window.MusicDost.resumeAudio(); setPlayingUI(true); startPoll(); }
+    } catch (e) {}
+  } else {
+    if (audio.paused) { audio.play().catch(() => {}); }
+    else { audio.pause(); }
+  }
 }
 function playNext() { if (qi < queue.length - 1) { qi++; playCurrent(); } }
-function playPrev() { if (audio.currentTime > 3) { audio.currentTime = 0; } else if (qi > 0) { qi--; playCurrent(); } }
+function playPrev() {
+  if (hasNative()) {
+    let pos = 0;
+    try { pos = window.MusicDost.audioPosition() | 0; } catch (e) {}
+    if (pos > 3000) { try { window.MusicDost.seekAudio(0); } catch (e) {} }
+    else if (qi > 0) { qi--; playCurrent(); }
+  } else {
+    if (audio.currentTime > 3) { audio.currentTime = 0; }
+    else if (qi > 0) { qi--; playCurrent(); }
+  }
+}
+function seekTo(frac) {
+  if (hasNative()) {
+    try {
+      const dur = window.MusicDost.audioDuration() | 0;
+      if (dur > 0) window.MusicDost.seekAudio(Math.floor(frac * dur));
+    } catch (e) {}
+  } else {
+    if (audio.duration) audio.currentTime = frac * audio.duration;
+  }
+}
 
-audio.onended = () => playNext();
-audio.onplay = () => { $('miniPP').textContent = '⏸'; $('fpPP').textContent = '⏸'; };
-audio.onpause = () => { $('miniPP').textContent = '▶'; $('fpPP').textContent = '▶'; };
+audio.onended = () => { if (!hasNative()) playNext(); };
+audio.onplay = () => { if (!hasNative()) setPlayingUI(true); };
+audio.onpause = () => { if (!hasNative()) setPlayingUI(false); };
 audio.ontimeupdate = () => {
+  if (hasNative()) return;
   if (audio.duration) {
     const v = Math.floor(audio.currentTime / audio.duration * 1000);
     $('fpSeek').value = v;
@@ -390,7 +471,7 @@ audio.ontimeupdate = () => {
 };
 $('miniPP').onclick = e => { e.stopPropagation(); togglePlay(); };
 $('miniplayer').onclick = () => openFullPlayer();
-$('fpSeek').oninput = () => { if (audio.duration) audio.currentTime = $('fpSeek').value / 1000 * audio.duration; };
+$('fpSeek').oninput = () => { seekTo($('fpSeek').value / 1000); };
 $('fpPP').onclick = togglePlay;
 $('fpNext').onclick = playNext;
 $('fpPrev').onclick = playPrev;

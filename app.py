@@ -67,6 +67,9 @@ os.makedirs(MEDIA_DIR, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
+# Code ek baar dalo, 90 din tak yaad rahe
+from datetime import timedelta
+app.permanent_session_lifetime = timedelta(days=90)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
 
 
@@ -222,6 +225,7 @@ def verify():
     data = request.get_json(silent=True) or {}
     if data.get("code") == APP_CODE and APP_CODE:
         session["authed"] = True
+        session.permanent = True
         return jsonify({"ok": True})
     return jsonify({"ok": False}), 401
 

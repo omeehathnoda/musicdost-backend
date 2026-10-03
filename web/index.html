@@ -164,6 +164,12 @@
       <input id="q" placeholder="Search songs or artists…" autocomplete="off">
       <button id="searchBtn">🔍</button>
     </div>
+    <div class="mx" style="margin:10px 0;">
+      <div style="display:flex;gap:8px;">
+        <input id="linkUrl" placeholder="Paste link (YouTube, Spotify…)…" autocomplete="off" style="flex:1;">
+        <button id="linkBtn" class="pillbtn">⬇ Get</button>
+      </div>
+    </div>
     <div id="histWrap">
       <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0;">
         <span style="color:var(--muted);font-size:13px;">Recent Searches</span>
@@ -558,7 +564,8 @@ function songRow(s, listId, idx, opts) {
   if (opts.like !== false) btns += `<button class="iconbtn" data-likebtn="${k}" onclick="uiLike('${listId}',${idx})" title="Like">${liked}</button>`;
   if (opts.menu !== false) btns += `<button class="iconbtn" onclick="uiMenu('${listId}',${idx})" title="Add to playlist">⋮</button>`;
   if (opts.remove) btns += `<button class="iconbtn" onclick="${opts.remove}" title="Remove">❌</button>`;
-  return `<div class="song">
+  const sel = opts.selBox ? `<input type="checkbox" class="selbox" data-idx="${idx}" style="display:none;margin-right:8px;transform:scale(1.4);" onchange="updateSelCount()">` : '';
+  return `<div class="song">${sel}
     <div class="art">🎵</div>
     <div class="info" onclick="uiPlay('${listId}',${idx})" style="cursor:pointer">
       <div class="title">${esc(s.title)} ${s.cached ? '<span class="flash">⚡</span>' : ''}${s.ytid ? ' <span class="yt">YT</span>' : ''}</div>
@@ -601,6 +608,20 @@ function renderRecent() {
 /* ============ SEARCH ============ */
 $('searchBtn').onclick = doSearch;
 $('q').onkeydown = e => { if (e.key === 'Enter') doSearch(); };
+$('linkBtn').onclick = async () => {
+  const url = $('linkUrl').value.trim();
+  if (!url) return;
+  $('results').innerHTML = '<div class="status">Fetching link… 🔗</div>';
+  try {
+    const d = await apiPost('/api/link', { url });
+    const s = { title: d.title, artist: d.artist, duration: 0 };
+    const id = regList([s]);
+    $('results').innerHTML = songListHTML([s], {});
+    $('linkUrl').value = '';
+  } catch (e) {
+    $('results').innerHTML = '<div class="status">Link failed 😅</div>';
+  }
+};
 $('histClear').onclick = () => { saveJSON('md_history', []); renderHistChips(); };
 function renderHistChips() {
   const h = loadJSON('md_history', []);
@@ -681,31 +702,88 @@ async function renderLiked() {
 }
 
 async function renderPlaylists() {
-  $('plList').innerHTML = '<div class="status">Load ho raha hai…</div>';
+  $('plList').innerHTML = '<div class="status">Loading…</div>';
   try {
     const d = await apiGet('/api/playlists');
     const pls = d.playlists || [];
-    $('plList').innerHTML = pls.length ? pls.map((p, i) =>
+    $('plList').innerHTML =
+      `<div class="mx" style="margin-bottom:8px;display:flex;gap:8px;">
+         <button class="pillbtn ghost" onclick="importShared()">📥 Import Shared</button>
+       </div>` +
+      (pls.length ? pls.map((p, i) =>
       `<div class="plcard" onclick="openPlaylist(${JSON.stringify(p.name).replace(/"/g, '&quot;')})">
          <span class="ic">📝</span>
-         <span><div class="nm">${esc(p.name)}</div><div class="ct">${p.count || 0} gaane</div></span>
+         <span><div class="nm">${esc(p.name)}</div><div class="ct">${p.count || 0} songs</div></span>
          <span class="go">›</span></div>`).join('')
-      : '<div class="status">No playlists yet — create one above 📝</div>';
-  } catch (e) { $('plList').innerHTML = '<div class="status">Couldn't load 😅</div>'; }
+      : '<div class="status">No playlists yet — create one above 📝</div>');
+  } catch (e) { $('plList').innerHTML = '<div class="status">Couldn\'t load 😅</div>'; }
 }
+window.importShared = async () => {
+  const t = prompt('Paste share token or link:');
+  if (!t) return;
+  const token = t.split('/').pop().trim();
+  try {
+    const d = await apiPost('/api/share/import', { token });
+    alert(`Imported "${d.name}" (${d.count} songs)!`);
+    renderPlaylists();
+  } catch (e) { alert("Couldn't import 😅"); }
+};
 
 window.openPlaylist = async name => {
-  $('plList').innerHTML = '<div class="status">Khul raha hai…</div>';
+  $('plList').innerHTML = '<div class="status">Opening…</div>';
   try {
     const d = await apiGet('/api/playlist?name=' + encodeURIComponent(name));
     const arr = d.songs || [];
     const id = regList(arr);
+    const qn = JSON.stringify(name).replace(/"/g, '&quot;');
     $('plList').innerHTML =
       `<button class="linkbtn" onclick="renderPlaylists()">‹ Back</button>
-       <h3 style="margin-top:4px;">📝 ${esc(name)} (${arr.length})</h3>` +
-      (arr.length ? arr.map((s, i) => songRow(s, id, i, { remove: `plRemove(${JSON.stringify(name).replace(/"/g, '&quot;')},'${id}',${i})` })).join('')
-        : '<div class="status">Playlist khaali hai</div>');
-  } catch (e) { $('plList').innerHTML = '<div class="status">Couldn't open 😅</div>'; }
+       <h3 style="margin-top:4px;">📝 ${esc(name)} (${arr.length})</h3>
+       ${arr.length ? `<div class="mx" style="margin-bottom:8px;">
+         <button class="pillbtn" onclick="dlAll('${id}')">⬇ Download All (${arr.length})</button>
+         <button class="pillbtn ghost" id="selBtn" onclick="toggleSel('${id}')">☑ Select</button>
+         <button class="pillbtn ghost" onclick="sharePl(${qn})">🔗 Share</button>
+       </div><div id="selBar" class="hidden mx" style="margin-bottom:8px;">
+         <button class="pillbtn" id="dlSelBtn" onclick="dlSelected('${id}')">⬇ Download Selected (0)</button>
+       </div>` : ''}` +
+      (arr.length ? arr.map((s, i) => songRow(s, id, i, { remove: `plRemove(${qn},'${id}',${i})`, selBox: true })).join('')
+        : '<div class="status">Playlist is empty</div>');
+  } catch (e) { $('plList').innerHTML = '<div class="status">Couldn\'t open 😅</div>'; }
+};
+window.dlAll = listId => {
+  const arr = getList(listId) || [];
+  if (!arr.length) return;
+  if (!confirm(`Download all ${arr.length} songs?`)) return;
+  arr.forEach((s, i) => setTimeout(() => uiDl(listId, i), i * 800));
+  alert(`${arr.length} downloads started! Check the Downloads tab.`);
+};
+let selMode = false;
+window.toggleSel = listId => {
+  selMode = !selMode;
+  document.querySelectorAll('.selbox').forEach(cb => { cb.style.display = selMode ? '' : 'none'; cb.checked = false; });
+  $('selBar').classList.toggle('hidden', !selMode);
+  $('selBtn').textContent = selMode ? '✖ Cancel' : '☑ Select';
+  updateSelCount();
+};
+window.updateSelCount = () => {
+  const n = document.querySelectorAll('.selbox:checked').length;
+  const b = $('dlSelBtn');
+  if (b) b.textContent = `⬇ Download Selected (${n})`;
+};
+window.sharePl = async qn => {
+  try {
+    const name = JSON.parse(qn);
+    const d = await apiPost('/api/share', { name });
+    const url = location.origin + '/s/' + d.token;
+    prompt('Share this link (token: ' + d.token + '):', url);
+  } catch (e) { alert("Couldn't share 😅"); }
+};
+window.dlSelected = listId => {
+  const boxes = [...document.querySelectorAll('.selbox:checked')];
+  if (!boxes.length) { alert('Select songs first!'); return; }
+  boxes.forEach((cb, i) => setTimeout(() => uiDl(listId, +cb.dataset.idx), i * 800));
+  alert(`${boxes.length} downloads started!`);
+  toggleSel(listId);
 };
 window.plRemove = async (name, listId, idx) => {
   const s = getSong(listId, idx);
@@ -717,12 +795,12 @@ window.plRemove = async (name, listId, idx) => {
 };
 
 $('newPlBtn').onclick = async () => {
-  const name = prompt('Playlist ka naam:');
+  const name = prompt('Playlist name:');
   if (!name || !name.trim()) return;
   try {
     await apiPost('/api/playlists', { name: name.trim() });
     renderPlaylists();
-  } catch (e) { alert('Ban nahi payi 😅'); }
+  } catch (e) { alert('Couldn't create 😅'); }
 };
 
 function renderPhone() {

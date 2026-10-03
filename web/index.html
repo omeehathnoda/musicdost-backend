@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>MusicDost</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --bg: #121212; --card: #1e1e1e; --accent: #1db954; --text: #f5f5f5; --muted: #9a9a9a; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; min-height: 100vh; }
+  .hidden { display: none !important; }
+
+  /* Code gate */
+  #gate { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+  #gate h1 { font-size: 40px; margin-bottom: 8px; }
+  #gate p { color: var(--muted); margin-bottom: 24px; }
+  #gate input { width: 100%; max-width: 300px; padding: 14px; font-size: 20px; text-align: center; letter-spacing: 6px;
+    background: var(--card); border: 1px solid #333; border-radius: 12px; color: var(--text); margin-bottom: 12px; }
+  #gate button { width: 100%; max-width: 300px; padding: 14px; font-size: 17px; background: var(--accent); border: none;
+    border-radius: 12px; color: #000; font-weight: 700; cursor: pointer; }
+  #gateErr { color: #ff6b6b; margin-top: 12px; min-height: 20px; }
+
+  /* App */
+  header { position: sticky; top: 0; background: var(--bg); padding: 12px 16px 8px; z-index: 10; }
+  header h1 { font-size: 22px; margin-bottom: 10px; }
+  #searchRow { display: flex; gap: 8px; }
+  #q { flex: 1; padding: 12px; font-size: 16px; background: var(--card); border: 1px solid #333; border-radius: 10px; color: var(--text); }
+  #searchBtn { padding: 12px 18px; background: var(--accent); border: none; border-radius: 10px; font-weight: 700; cursor: pointer; }
+  #results { padding: 8px 16px 110px; }
+  .song { display: flex; align-items: center; gap: 10px; background: var(--card); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .song .info { flex: 1; min-width: 0; }
+  .song .title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .song .meta { color: var(--muted); font-size: 13px; }
+  .song .flash { color: var(--accent); font-size: 13px; }
+  .btn { border: none; border-radius: 50%; width: 42px; height: 42px; font-size: 17px; cursor: pointer; flex-shrink: 0; }
+  .play { background: var(--accent); color: #000; }
+  .dl { background: #333; color: var(--text); }
+  #status { text-align: center; color: var(--muted); padding: 20px; }
+
+  /* Player bar */
+  #player { position: fixed; left: 0; right: 0; bottom: 0; background: #1a1a1a; border-top: 1px solid #333;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); z-index: 20; }
+  #nowPlaying { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; }
+  #controls { display: flex; align-items: center; gap: 10px; }
+  #ppBtn { width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--accent); font-size: 18px; cursor: pointer; flex-shrink: 0; }
+  #seek { flex: 1; accent-color: var(--accent); }
+  #time { font-size: 12px; color: var(--muted); min-width: 90px; text-align: right; }
+  audio { display: none; }
+</style>
+</head>
+<body>
+
+<!-- Code gate: pehla page -->
+<div id="gate">
+  <h1>🎵 MusicDost</h1>
+  <p>Code daalo taaki andar ja sako</p>
+  <input id="codeInput" type="password" inputmode="numeric" placeholder="••••" autocomplete="off">
+  <button id="codeBtn">Andar Jao</button>
+  <div id="gateErr"></div>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <header>
+    <h1>🎵 MusicDost</h1>
+    <div id="searchRow">
+      <input id="q" placeholder="Gaana ya singer likho…" autocomplete="off">
+      <button id="searchBtn">🔍</button>
+    </div>
+  </header>
+  <div id="results"><div id="status">Upar search karo 🎶</div></div>
+  <div id="player" class="hidden">
+    <div id="nowPlaying">—</div>
+    <div id="controls">
+      <button id="ppBtn">⏸</button>
+      <input id="seek" type="range" min="0" max="1000" value="0">
+      <span id="time">0:00 / 0:00</span>
+    </div>
+  </div>
+  <audio id="audio" preload="metadata"></audio>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const gate = $('gate'), app = $('app'), audio = $('audio');
+
+function fmt(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+// ---- Code gate ----
+$('codeBtn').onclick = verify;
+$('codeInput').onkeydown = e => { if (e.key === 'Enter') verify(); };
+async function verify() {
+  const code = $('codeInput').value.trim();
+  if (!code) return;
+  $('gateErr').textContent = '';
+  try {
+    const r = await fetch('/api/verify', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({code})
+    });
+    if (r.ok) { gate.classList.add('hidden'); app.classList.remove('hidden'); $('q').focus(); }
+    else $('gateErr').textContent = 'Galat code 😅';
+  } catch (e) { $('gateErr').textContent = 'Server se baat nahi ho rahi'; }
+  $('codeInput').value = '';
+}
+
+// ---- Search ----
+$('searchBtn').onclick = search;
+$('q').onkeydown = e => { if (e.key === 'Enter') search(); };
+let searching = false;
+async function search() {
+  const q = $('q').value.trim();
+  if (!q || searching) return;
+  searching = true;
+  $('results').innerHTML = '<div id="status">Dhundh rahe hain… 🔍</div>';
+  try {
+    const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+    if (r.status === 401) return location.reload();
+    const d = await r.json();
+    render(d.results || []);
+  } catch (e) {
+    $('results').innerHTML = '<div id="status">Kuch gadbad hui 😅</div>';
+  }
+  searching = false;
+}
+function render(list) {
+  if (!list.length) { $('results').innerHTML = '<div id="status">Kuch nahi mila 😕</div>'; return; }
+  $('results').innerHTML = list.map((s, i) => `
+    <div class="song">
+      <div class="info">
+        <div class="title">${esc(s.title)} ${s.cached ? '<span class="flash">⚡</span>' : ''}</div>
+        <div class="meta">${esc(s.artist)}${s.duration ? ' • ' + fmt(s.duration) : ''}</div>
+      </div>
+      <button class="btn play" data-i="${i}" title="Play">▶</button>
+      <button class="btn dl" data-i="${i}" title="Download">⬇</button>
+    </div>`).join('');
+  window._songs = list;
+  document.querySelectorAll('.btn.play').forEach(b => b.onclick = () => playSong(+b.dataset.i));
+  document.querySelectorAll('.btn.dl').forEach(b => b.onclick = () => dlSong(+b.dataset.i));
+}
+function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function streamUrl(s) {
+  return '/api/stream?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist);
+}
+
+// ---- Player ----
+function playSong(i) {
+  const s = window._songs[i];
+  if (!s) return;
+  audio.src = streamUrl(s);
+  audio.play().catch(() => {});
+  $('nowPlaying').textContent = s.title + ' — ' + s.artist;
+  $('player').classList.remove('hidden');
+  $('ppBtn').textContent = '⏸';
+  if ('mediaSession' in navigator) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: s.title, artist: s.artist, album: 'MusicDost' });
+    } catch (e) {}
+  }
+}
+$('ppBtn').onclick = () => {
+  if (audio.paused) { audio.play().catch(() => {}); $('ppBtn').textContent = '⏸'; }
+  else { audio.pause(); $('ppBtn').textContent = '▶'; }
+};
+audio.onended = () => { $('ppBtn').textContent = '▶'; };
+audio.ontimeupdate = () => {
+  if (audio.duration) $('seek').value = Math.floor(audio.currentTime / audio.duration * 1000);
+  $('time').textContent = fmt(audio.currentTime) + ' / ' + fmt(audio.duration);
+};
+$('seek').oninput = () => {
+  if (audio.duration) audio.currentTime = $('seek').value / 1000 * audio.duration;
+};
+
+// ---- Download: native app bridge ho to wahi, nahi to seedha link ----
+function dlSong(i) {
+  const s = window._songs[i];
+  if (!s) return;
+  const rel = '/api/download?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist);
+  const fname = (s.title + ' - ' + s.artist).replace(/[^\w\s\-()]/g, '').trim() + '.mp3';
+  if (window.MusicDost && typeof window.MusicDost.download === 'function') {
+    // Android app: ABSOLUTE URL chahiye DownloadManager ke liye
+    window.MusicDost.download(location.origin + rel, fname);
+  } else {
+    const a = document.createElement('a');
+    a.href = rel; a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+}
+</script>
+</body>
+</html>

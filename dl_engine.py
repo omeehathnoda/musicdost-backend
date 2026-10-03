@@ -152,7 +152,7 @@ def jiosaavn_chart(listid, n=50):
         req = urllib.request.Request(
             "https://www.jiosaavn.com/api.php?" + params,
             headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.load(resp)
     except Exception:
         return []
@@ -587,7 +587,7 @@ def indown_video_url(ig_url):
     try:
         jar = {}
         req = urllib.request.Request("https://indown.io/en4", headers={"User-Agent": UA})
-        with urllib.request.urlopen(req, timeout=25) as r:
+        with urllib.request.urlopen(req, timeout=10) as r:
             page = r.read().decode("utf-8", "ignore")
             for c in r.headers.get_all("Set-Cookie") or []:
                 jar[c.split(";")[0].split("=")[0]] = c.split(";")[0].split("=", 1)[1]
@@ -1075,7 +1075,7 @@ def _jiosaavn_playlist_info(url):
         req = urllib.request.Request(
             "https://www.jiosaavn.com/api.php?" + params,
             headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.load(resp)
         if p == 1:
             label = data.get("title") or label
@@ -1118,7 +1118,7 @@ def _spotify_playlist_info(url):
     req = urllib.request.Request(
         "https://open.spotify.com/embed/playlist/" + m.group(1),
         headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=25) as resp:
+    with urllib.request.urlopen(req, timeout=10) as resp:
         raw = resp.read().decode("utf-8", "ignore")
     label = "Spotify Playlist"
     try:  # playlist ka naam canonical page ke og:title se

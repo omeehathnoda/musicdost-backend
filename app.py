@@ -83,11 +83,45 @@ def safe_key(key):
 
 
 TG_CACHE_FILE = os.path.join(BASE, "tg_cache.json")
+# GitHub se fresh cache lao (deploy ka wait mat karo)
+TG_CACHE_URL = "https://raw.githubusercontent.com/omeehathnoda/musicdost-backend/main/tg_cache.json"
+_tg_cache_time = 0
+
+def _refresh_tg_cache():
+    """GitHub se latest tg_cache.json lao (1 ghante me ek baar)."""
+    global _tg_cache, _tg_cache_time
+    import time
+    now = time.time()
+    if _tg_cache is not None and now - _tg_cache_time < 3600:
+        return
+    try:
+        import urllib.request, json
+        req = urllib.request.Request(TG_CACHE_URL,
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.load(r)
+            if isinstance(data, dict) and len(data) > 100:
+                _tg_cache = data
+                _tg_cache_time = now
+                # Disk par bhi save karo
+                try:
+                    with open(TG_CACHE_FILE, "w") as f:
+                        json.dump(data, f)
+                except Exception:
+                    pass
+                return
+    except Exception:
+        pass
+    # GitHub fail ho to local file
+    if _tg_cache is None:
+        _tg_cache = _load_json_file(TG_CACHE_FILE, {})
+        _tg_cache_time = now
 _tg_cache = None
 
 def tg_cache_lookup(title, artist):
     """Telegram channel me file_id dhoondo. Returns file_id or None."""
     global _tg_cache
+    _refresh_tg_cache()
     if _tg_cache is None:
         _tg_cache = _load_json_file(TG_CACHE_FILE, {})
     key = (title + "|" + artist).lower()

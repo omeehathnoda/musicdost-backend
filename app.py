@@ -514,5 +514,80 @@ def liked_toggle():
     return jsonify({"ok": True, "liked": like})
 
 
+# ---------------- Link download ----------------
+@app.route("/api/link", methods=["POST"])
+def link_download():
+    """URL paste karo -> info + download (bot jaisa)."""
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or "").strip()
+    if not url or not url.startswith("http"):
+        return jsonify({"error": "valid link do"}), 400
+    try:
+        info = dl_engine._title_of(url)
+        title = info.strip() or "song"
+        artist = ""
+    except Exception:
+        title, artist = "song", ""
+    return jsonify({
+        "ok": True, "title": title, "artist": artist,
+        "stream": "/api/stream?title=" + urllib.parse.quote(title) +
+                  "&artist=" + urllib.parse.quote(artist),
+        "dl": "/api/download?title=" + urllib.parse.quote(title) +
+              "&artist=" + urllib.parse.quote(artist),
+        "filename": f"{title} - {artist}".strip(" -") + ".mp3",
+    })
+
+
+# ---------------- Playlist sharing ----------------
+SHARED_FILE = os.path.join(DATA_DIR, "shared_playlists.json")
+
+@app.route("/api/share", methods=["POST"])
+def share_playlist():
+    import secrets, time
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "naam do"}), 400
+    pls = _get_playlists()
+    songs = pls.get(name, [])
+    if not songs:
+        return jsonify({"error": "playlist empty hai"}), 400
+    shared = _load_json_file(SHARED_FILE, {})
+    token = secrets.token_urlsafe(12)
+    shared[token] = {"name": name, "songs": songs, "at": time.time()}
+    _save_json_file(SHARED_FILE, shared)
+    return jsonify({"ok": True, "token": token})
+
+
+@app.route("/api/shared/<token>")
+def shared_get(token):
+    shared = _load_json_file(SHARED_FILE, {})
+    s = shared.get(token)
+    if not s:
+        return jsonify({"error": "link kaam nahi kar raha"}), 404
+    return jsonify({"name": s["name"], "songs": s["songs"]})
+
+
+@app.route("/api/share/import", methods=["POST"])
+def share_import():
+    data = request.get_json(silent=True) or {}
+    token = (data.get("token") or "").strip()
+    if not token:
+        return jsonify({"error": "token do"}), 400
+    shared = _load_json_file(SHARED_FILE, {})
+    s = shared.get(token)
+    if not s:
+        return jsonify({"error": "link kaam nahi kar raha"}), 404
+    pls = _get_playlists()
+    name = s["name"]
+    base, i = name, 2
+    while name in pls:
+        name = f"{base} ({i})"
+        i += 1
+    pls[name] = s["songs"]
+    _save_json_file(PLAYLISTS_FILE, pls)
+    return jsonify({"ok": True, "name": name, "count": len(s["songs"])})
+
+
 if __name__ == "__main__":
     app.run(host=HOST, port=PORT, threaded=True)

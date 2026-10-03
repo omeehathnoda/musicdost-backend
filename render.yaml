@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: musicdost-backend
+    runtime: python
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 120"
+    plan: free
+    envVars:
+      - key: APP_CODE
+        sync: false
+      - key: TG_BOT_TOKEN
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true

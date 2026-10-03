@@ -314,6 +314,10 @@ def send_range(path, download_name=None):
 @app.before_request
 def _gate():
     if request.path.startswith("/api/") and request.path != "/api/verify":
+        # Token se bhi auth chalega (native app ke liye)
+        tok = request.args.get("token") or request.headers.get("X-App-Token")
+        if tok and tok in _app_tokens:
+            return None
         if not session.get("authed"):
             return jsonify({"error": "unauthorized"}), 401
 
@@ -324,8 +328,15 @@ def verify():
     if data.get("code") == APP_CODE and APP_CODE:
         session["authed"] = True
         session.permanent = True
-        return jsonify({"ok": True})
+        # Native app ke liye token bhi do
+        import secrets
+        token = secrets.token_urlsafe(24)
+        _app_tokens[token] = True
+        return jsonify({"ok": True, "token": token})
     return jsonify({"ok": False}), 401
+
+
+_app_tokens = {}
 
 
 @app.route("/api/search")

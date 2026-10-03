@@ -115,8 +115,11 @@ def jiosaavn_search(query, n=5):
         title = (r.get("title") or "").strip()
         mi = r.get("more_info") or {}
         enc = (mi.get("encrypted_media_url") or "").strip()
-        artist = (mi.get("singers") or "").strip() or \
-                 (mi.get("artistMap", {}).get("primary_artists", [{}])[0].get("name", "") if isinstance(mi.get("artistMap"), dict) else "")
+        artist = (mi.get("singers") or "").strip()
+        if not artist and isinstance(mi.get("artistMap"), dict):
+            pa = mi["artistMap"].get("primary_artists") or []
+            if pa and isinstance(pa[0], dict):
+                artist = (pa[0].get("name") or "").strip()
         if not title or not enc:
             continue
         k = (title + "|" + artist).lower()

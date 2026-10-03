@@ -435,8 +435,9 @@ const gate = $('gate'), app = $('app'), audio = $('audio');
 function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmt(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function skey(s) { return ((s.title || '') + '|' + (s.artist || '')).toLowerCase(); }
-function streamUrl(s) { return '/api/stream?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist) + (s.ytid ? '&ytid=' + encodeURIComponent(s.ytid) : ''); }
-function dlUrl(s) { return '/api/download?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist) + (s.ytid ? '&ytid=' + encodeURIComponent(s.ytid) : ''); }
+function appToken() { try { return localStorage.getItem('md_token') || ''; } catch (e) { return ''; } }
+function streamUrl(s) { return '/api/stream?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist) + (s.ytid ? '&ytid=' + encodeURIComponent(s.ytid) : '') + (appToken() ? '&token=' + appToken() : ''); }
+function dlUrl(s) { return '/api/download?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist) + (s.ytid ? '&ytid=' + encodeURIComponent(s.ytid) : '') + (appToken() ? '&token=' + appToken() : ''); }
 function fileName(s) { return ((s.title || '') + ' - ' + (s.artist || '')).replace(/[^\w\s\-()]/g, '').trim().slice(0, 80) + '.mp3'; }
 
 async function apiGet(path) {
@@ -500,10 +501,17 @@ async function verify() {
   try {
     const r = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
     if (r.ok) {
-      // App me code save karo (dobara na mange)
+      const d = await r.json();
+      // App me code + token save karo (dobara na mange)
       try {
         if (window.MusicDost && typeof window.MusicDost.saveAuthCode === 'function') {
           window.MusicDost.saveAuthCode(code);
+        }
+        if (d.token) {
+          localStorage.setItem('md_token', d.token);
+          if (window.MusicDost && typeof window.MusicDost.saveAuthToken === 'function') {
+            window.MusicDost.saveAuthToken(d.token);
+          }
         }
       } catch (e) {}
       gate.classList.add('hidden'); app.classList.remove('hidden'); boot();

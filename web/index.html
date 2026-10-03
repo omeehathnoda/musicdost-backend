@@ -139,8 +139,8 @@
 <div id="gate">
   <h1>🎵 MusicDost</h1>
   <p>Code daalo taaki andar ja sako</p>
-  <input id="codeInput" type="password" inputmode="text" placeholder="Code dalo" autocomplete="off">
-  <button id="codeBtn">Andar Jao</button>
+  <input id="codeInput" type="password" inputmode="text" placeholder="Enter code" autocomplete="off">
+  <button id="codeBtn">Unlock Jao</button>
   <div id="gateErr"></div>
 </div>
 
@@ -154,32 +154,32 @@
     <h2 id="trendHead">🔥 Trending</h2>
     <div id="trendList"><div class="status">Load ho raha hai…</div></div>
     <h2>🕐 Recently Played</h2>
-    <div id="recentList"><div class="status">Abhi kuch nahi bajaya</div></div>
+    <div id="recentList"><div class="status">Nothing played yet</div></div>
   </main>
 
   <!-- SEARCH -->
   <main id="tab-search" class="tab hidden">
     <div class="pageTitle">🔍 Search</div>
     <div id="searchRow">
-      <input id="q" placeholder="Gaana ya singer likho…" autocomplete="off">
+      <input id="q" placeholder="Search songs or artists…" autocomplete="off">
       <button id="searchBtn">🔍</button>
     </div>
     <div id="histWrap">
       <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0;">
-        <span style="color:var(--muted);font-size:13px;">Recent searches</span>
+        <span style="color:var(--muted);font-size:13px;">Recent Searches</span>
         <button class="linkbtn" id="histClear">Clear</button>
       </div>
       <div class="chips" id="histChips"></div>
     </div>
-    <div id="results"><div class="status">Upar search karo 🎶</div></div>
+    <div id="results"><div class="status">Search above 🎶</div></div>
   </main>
 
   <!-- DOWNLOADS -->
   <main id="tab-downloads" class="tab hidden">
     <div class="pageTitle">⬇️ Downloads</div>
-    <h3>Chal rahe hain</h3>
+    <h3>In Progress</h3>
     <div id="activeDl"><div class="status">Load ho raha hai…</div></div>
-    <h3>Ho gaye</h3>
+    <h3>Completed</h3>
     <div id="doneDl"><div class="status">Load ho raha hai…</div></div>
   </main>
 
@@ -191,7 +191,7 @@
     <h3>📝 Playlists</h3>
     <button class="bigbtn" id="newPlBtn">➕ Nayi Playlist Banao</button>
     <div id="plList"><div class="status">Load ho raha hai…</div></div>
-    <h3>📱 Phone ke Gaane</h3>
+    <h3>📱 On This Device</h3>
     <div id="phoneList"><div class="status">Load ho raha hai…</div></div>
   </main>
 
@@ -229,7 +229,7 @@
     </div>
     <div id="fpActions">
       <button id="fpLike" title="Like">🤍</button>
-      <button id="fpPlAdd" title="Playlist me dalo">➕</button>
+      <button id="fpPlAdd" title="Add to playlist">➕</button>
       <button id="fpDl" title="Download">⬇️</button>
     </div>
     <div id="fpQueue"><div class="qhead">QUEUE</div><div id="fpQueueList"></div></div>
@@ -238,14 +238,14 @@
   <!-- Playlist picker modal -->
   <div id="plmodal" class="modalwrap hidden">
     <div class="modal">
-      <h3 id="plmodalTitle">Playlist me dalo</h3>
+      <h3 id="plmodalTitle">Add to playlist</h3>
       <div id="plmodalSong" style="color:var(--muted);font-size:13px;margin-bottom:10px;"></div>
       <div id="plmodalNew" style="display:flex;gap:8px;margin-bottom:10px;">
-        <input type="text" id="plmodalName" placeholder="Nayi playlist ka naam…" style="margin-bottom:0;">
+        <input type="text" id="plmodalName" placeholder="Playlist name…" style="margin-bottom:0;">
         <button class="bigbtn solid" id="plmodalCreate" style="width:auto;padding:12px 18px;margin:0;">➕</button>
       </div>
       <div id="plmodalList"></div>
-      <div class="mx"><button class="linkbtn" id="plmodalClose">Band karo</button></div>
+      <div class="mx"><button class="linkbtn" id="plmodalClose">Close</button></div>
     </div>
   </div>
 
@@ -314,7 +314,7 @@ async function verify() {
     const r = await fetch('/api/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
     if (r.ok) { gate.classList.add('hidden'); app.classList.remove('hidden'); boot(); }
     else $('gateErr').textContent = 'Galat code 😅';
-  } catch (e) { $('gateErr').textContent = 'Server se baat nahi ho rahi'; }
+  } catch (e) { $('gateErr').textContent = 'Can't reach the server'; }
   $('codeInput').value = '';
 }
 
@@ -378,7 +378,7 @@ window.nativeOnState = function (state, duration) {
   } else if (state === 'error') {
     setPlayingUI(false);
     stopPoll();
-    $('miniT').textContent = 'Gaana nahi baj paya 😅';
+    $('miniT').textContent = 'Couldn't play this song 😅';
   }
 };
 window.nativeNext = function () { playNext(); };
@@ -396,7 +396,7 @@ function playCurrent() {
     try {
       window.MusicDost.playAudio(absStreamUrl(s), s.title || '', s.artist || '');
     } catch (e) {
-      $('miniT').textContent = 'Gaana nahi baj paya 😅';
+      $('miniT').textContent = 'Couldn't play this song 😅';
       setPlayingUI(false);
       return;
     }
@@ -484,7 +484,7 @@ function openFullPlayer() {
   updateLikeUI();
 }
 function closeFullPlayer() { $('fullplayer').classList.add('hidden'); }
-// neeche swipe karke band karo
+// swipe down to close
 (function () {
   let sy = 0;
   const fp = $('fullplayer');
@@ -516,13 +516,13 @@ async function toggleLike(s) {
   updateLikeUI();
   try {
     await apiPost('/api/liked', { title: s.title, artist: s.artist, liked: !has });
-  } catch (e) { /* wapas karo */ if (has) likedSet.add(k); else likedSet.delete(k); updateLikeUI(); }
+  } catch (e) { /* revert */ if (has) likedSet.add(k); else likedSet.delete(k); updateLikeUI(); }
   if (currentTab === 'library') renderLiked();
 }
 function updateLikeUI() {
   const s = queue[qi];
   $('fpLike').textContent = (s && likedSet.has(skey(s))) ? '❤️' : '🤍';
-  // visible song rows ke like buttons refresh karo
+  // refresh like buttons on visible rows
   document.querySelectorAll('[data-likebtn]').forEach(b => {
     const sk = b.getAttribute('data-likebtn');
     b.textContent = likedSet.has(sk) ? '❤️' : '🤍';
@@ -556,8 +556,8 @@ function songRow(s, listId, idx, opts) {
   let btns = `<button class="btnround" onclick="uiPlay('${listId}',${idx})" title="Play">▶</button>`;
   if (!opts.noDl) btns += `<button class="btnround ghost" onclick="uiDl('${listId}',${idx})" title="Download">⬇</button>`;
   if (opts.like !== false) btns += `<button class="iconbtn" data-likebtn="${k}" onclick="uiLike('${listId}',${idx})" title="Like">${liked}</button>`;
-  if (opts.menu !== false) btns += `<button class="iconbtn" onclick="uiMenu('${listId}',${idx})" title="Playlist me dalo">⋮</button>`;
-  if (opts.remove) btns += `<button class="iconbtn" onclick="${opts.remove}" title="Hatao">❌</button>`;
+  if (opts.menu !== false) btns += `<button class="iconbtn" onclick="uiMenu('${listId}',${idx})" title="Add to playlist">⋮</button>`;
+  if (opts.remove) btns += `<button class="iconbtn" onclick="${opts.remove}" title="Remove">❌</button>`;
   return `<div class="song">
     <div class="art">🎵</div>
     <div class="info" onclick="uiPlay('${listId}',${idx})" style="cursor:pointer">
@@ -566,7 +566,7 @@ function songRow(s, listId, idx, opts) {
     </div>${btns}</div>`;
 }
 function songListHTML(arr, opts) {
-  if (!arr || !arr.length) return '<div class="status">Kuch nahi hai 😕</div>';
+  if (!arr || !arr.length) return '<div class="status">Nothing here yet 😕</div>';
   const id = regList(arr);
   return arr.map((s, i) => songRow(s, id, i, opts)).join('');
 }
@@ -590,12 +590,12 @@ async function loadTrending(lang) {
     $('trendHead').textContent = '🔥 ' + (d.name || 'Trending');
     $('trendList').innerHTML = songListHTML(d.songs || []);
   } catch (e) {
-    $('trendList').innerHTML = '<div class="status">Load nahi hua 😅</div>';
+    $('trendList').innerHTML = '<div class="status">Couldn't load 😅</div>';
   }
 }
 function renderRecent() {
   const r = loadJSON('md_recent', []);
-  $('recentList').innerHTML = r.length ? songListHTML(r, { menu: false }) : '<div class="status">Abhi kuch nahi bajaya</div>';
+  $('recentList').innerHTML = r.length ? songListHTML(r, { menu: false }) : '<div class="status">Nothing played yet</div>';
 }
 
 /* ============ SEARCH ============ */
@@ -615,12 +615,12 @@ async function doSearch() {
   if (!q || searching) return;
   searching = true;
   addHistory(q);
-  $('results').innerHTML = '<div class="status">Dhundh rahe hain… 🔍</div>';
+  $('results').innerHTML = '<div class="status">Searching… 🔍</div>';
   try {
     const d = await apiGet('/api/search?q=' + encodeURIComponent(q));
     $('results').innerHTML = songListHTML(d.results || []);
   } catch (e) {
-    $('results').innerHTML = '<div class="status">Kuch gadbad hui 😅</div>';
+    $('results').innerHTML = '<div class="status">Something went wrong 😅</div>';
   }
   searching = false;
 }
@@ -642,11 +642,11 @@ function renderDownloads() {
   if (act === null) {
     $('activeDl').innerHTML = '<div class="status">Active downloads sirf app me dikhenge 📱</div>';
   } else if (!act.length) {
-    $('activeDl').innerHTML = '<div class="status">Koi download chal nahi raha</div>';
+    $('activeDl').innerHTML = '<div class="status">No active downloads</div>';
   } else {
     $('activeDl').innerHTML = act.map(d => {
       const pct = d.total > 0 ? Math.min(100, Math.round(d.downloaded / d.total * 100)) : 0;
-      const st = d.status === 'failed' ? '❌ Fail' : d.status === 'done' ? '✅ Ho gaya' : '⏳ ' + pct + '%';
+      const st = d.status === 'failed' ? '❌ Failed' : d.status === 'done' ? '✅ Done' : '⏳ ' + pct + '%';
       return `<div class="dlitem"><div class="nm">${esc(d.filename)}</div>
         <div class="pbar"><div style="width:${pct}%"></div></div>
         <div class="pct">${st}${d.total ? ' • ' + fmtMB(d.downloaded) + ' / ' + fmtMB(d.total) : ''}</div></div>`;
@@ -657,7 +657,7 @@ function renderDownloads() {
   if (done === null) {
     $('doneDl').innerHTML = '<div class="status">Downloaded files sirf app me dikhengi 📱</div>';
   } else if (!done.length) {
-    $('doneDl').innerHTML = '<div class="status">Abhi kuch download nahi kiya</div>';
+    $('doneDl').innerHTML = '<div class="status">Nothing downloaded yet</div>';
   } else {
     $('doneDl').innerHTML = done.map(f =>
       `<div class="dlitem"><div class="nm">🎵 ${esc(f.name)}</div>
@@ -676,8 +676,8 @@ async function renderLiked() {
     // likedSet sync rakho
     likedSet = new Set(arr.map(skey));
     updateLikeUI();
-    $('likedList').innerHTML = arr.length ? songListHTML(arr, { like: false }) : '<div class="status">Abhi kuch like nahi kiya 🤍</div>';
-  } catch (e) { $('likedList').innerHTML = '<div class="status">Load nahi hua 😅</div>'; }
+    $('likedList').innerHTML = arr.length ? songListHTML(arr, { like: false }) : '<div class="status">No liked songs yet 🤍</div>';
+  } catch (e) { $('likedList').innerHTML = '<div class="status">Couldn't load 😅</div>'; }
 }
 
 async function renderPlaylists() {
@@ -690,8 +690,8 @@ async function renderPlaylists() {
          <span class="ic">📝</span>
          <span><div class="nm">${esc(p.name)}</div><div class="ct">${p.count || 0} gaane</div></span>
          <span class="go">›</span></div>`).join('')
-      : '<div class="status">Koi playlist nahi — upar se banao 📝</div>';
-  } catch (e) { $('plList').innerHTML = '<div class="status">Load nahi hua 😅</div>'; }
+      : '<div class="status">No playlists yet — create one above 📝</div>';
+  } catch (e) { $('plList').innerHTML = '<div class="status">Couldn't load 😅</div>'; }
 }
 
 window.openPlaylist = async name => {
@@ -701,11 +701,11 @@ window.openPlaylist = async name => {
     const arr = d.songs || [];
     const id = regList(arr);
     $('plList').innerHTML =
-      `<button class="linkbtn" onclick="renderPlaylists()">‹ Wapas</button>
+      `<button class="linkbtn" onclick="renderPlaylists()">‹ Back</button>
        <h3 style="margin-top:4px;">📝 ${esc(name)} (${arr.length})</h3>` +
       (arr.length ? arr.map((s, i) => songRow(s, id, i, { remove: `plRemove(${JSON.stringify(name).replace(/"/g, '&quot;')},'${id}',${i})` })).join('')
         : '<div class="status">Playlist khaali hai</div>');
-  } catch (e) { $('plList').innerHTML = '<div class="status">Khul nahi paya 😅</div>'; }
+  } catch (e) { $('plList').innerHTML = '<div class="status">Couldn't open 😅</div>'; }
 };
 window.plRemove = async (name, listId, idx) => {
   const s = getSong(listId, idx);
@@ -728,9 +728,9 @@ $('newPlBtn').onclick = async () => {
 function renderPhone() {
   const files = bridgeGet('listDownloads');
   if (files === null) {
-    $('phoneList').innerHTML = '<div class="status">Phone ke gaane sirf app me dikhenge 📱</div>';
+    $('phoneList').innerHTML = '<div class="status">On this device sirf app me dikhenge 📱</div>';
   } else if (!files.length) {
-    $('phoneList').innerHTML = '<div class="status">Phone me koi gaana nahi</div>';
+    $('phoneList').innerHTML = '<div class="status">No songs on this device</div>';
   } else {
     $('phoneList').innerHTML = files.map(f =>
       `<div class="dlitem"><div class="nm">🎵 ${esc(f.name)}</div>
@@ -756,7 +756,7 @@ async function loadPlModalList() {
       `<div class="mrow" onclick="plPickAdd(${JSON.stringify(p.name).replace(/"/g, '&quot;')})">
          <span>📝</span><span>${esc(p.name)}</span><span style="color:var(--muted);font-size:12px;">${p.count || 0}</span></div>`).join('')
       : '<div class="status">Koi playlist nahi — upar se nayi banao</div>';
-  } catch (e) { $('plmodalList').innerHTML = '<div class="status">Load nahi hua 😅</div>'; }
+  } catch (e) { $('plmodalList').innerHTML = '<div class="status">Couldn't load 😅</div>'; }
 }
 window.plPickAdd = async name => {
   if (!plPickSong) return;

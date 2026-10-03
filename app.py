@@ -115,14 +115,32 @@ def tg_download_file(file_id, dest_path):
         return False
 
 
-def ensure_media(title, artist):
+def ensure_media(title, artist, ytid=None):
     """MP3 lao. Returns (path, err)."""
     key = (title + "|" + artist).lower()
+    if ytid:
+        key = "yt:" + ytid
     path = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
     if os.path.exists(path) and os.path.getsize(path) > 50 * 1024:
         return path, None
     tmpdir = os.path.join(MEDIA_DIR, ".work")
     os.makedirs(tmpdir, exist_ok=True)
+
+    # 0. Seedha YouTube video ID mila ho to wahi se
+    if ytid:
+        try:
+            yp, _ = dl_engine.download_audio(
+                f"https://www.youtube.com/watch?v={ytid}", tmpdir)
+            if yp and os.path.exists(yp):
+                try:
+                    os.replace(yp, path)
+                except OSError:
+                    import shutil
+                    shutil.copy(yp, path)
+                return path, None
+        except Exception:
+            pass
+        return None, "not_found"
 
     # 1. JioSaavn
     try:
@@ -277,6 +295,32 @@ def search():
             "_score": relevance(t, a),
         })
     out.sort(key=lambda x: x["_score"], reverse=True)
+    # JioSaavn me kuch relevant nahi mila to YouTube se lao
+    best = out[0]["_score"] if out else 0
+    if best < 20:
+        try:
+            for v in dl_engine.yt_search(q + " song", n=5):
+                vid = v.get("id", "")
+                t = v.get("title", "") or "video"
+                a = v.get("uploader", "")
+                # duration "3:45" -> seconds
+                dur = 0
+                try:
+                    parts = (v.get("duration") or "").split(":")
+                    for p in parts:
+                        dur = dur * 60 + int(p)
+                except (ValueError, TypeError):
+                    dur = 0
+                if dur > 2700:  # 45 min se lamba skip
+                    continue
+                key = ("yt:" + vid).lower()
+                out.append({
+                    "key": key, "title": t, "artist": a,
+                    "duration": dur, "cached": False,
+                    "ytid": vid, "_score": 15,
+                })
+        except Exception:
+            pass
     for x in out:
         del x["_score"]
     return jsonify({"results": out})
@@ -286,9 +330,10 @@ def search():
 def stream():
     title = (request.args.get("title") or "").strip()
     artist = (request.args.get("artist") or "").strip()
+    ytid = (request.args.get("ytid") or "").strip() or None
     if not title:
         return jsonify({"error": "title chahiye"}), 400
-    path, err = ensure_media(title, artist)
+    path, err = ensure_media(title, artist, ytid=ytid)
     if not path:
         return jsonify({"error": err}), 404
     return send_range(path)
@@ -298,9 +343,10 @@ def stream():
 def download():
     title = (request.args.get("title") or "").strip()
     artist = (request.args.get("artist") or "").strip()
+    ytid = (request.args.get("ytid") or "").strip() or None
     if not title:
         return jsonify({"error": "title chahiye"}), 400
-    path, err = ensure_media(title, artist)
+    path, err = ensure_media(title, artist, ytid=ytid)
     if not path:
         return jsonify({"error": err}), 404
     return send_range(path, download_name=f"{title} - {artist}")

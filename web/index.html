@@ -605,6 +605,20 @@ function playCurrent() {
   setPlayingUI(true);
   $('fpSong').textContent = s.title || '—';
   $('fpArtist').textContent = s.artist || '';
+  // Player cover art
+  const fpArt = $('fpArt');
+  if (s.image) {
+    fpArt.innerHTML = `<img src="${esc(s.image)}" style="width:100%;height:100%;object-fit:cover;border-radius:20px;" onerror="this.remove()">`;
+  } else {
+    fpArt.innerHTML = '🎵';
+  }
+  // Mini player art
+  const miniArt = document.querySelector('#miniplayer .art');
+  if (miniArt) {
+    miniArt.innerHTML = s.image
+      ? `<img src="${esc(s.image)}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;" onerror="this.remove()">`
+      : '🎵';
+  }
   renderFpQueue();
   updateLikeUI();
   addRecent(s);

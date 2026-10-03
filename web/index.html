@@ -47,6 +47,7 @@
   .song .title { font-weight: 600; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .song .meta { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .song .flash { color: var(--accent); font-size: 13px; }
+  .song .yt { background: #c00; color: #fff; font-size: 10px; padding: 1px 5px; border-radius: 3px; }
   .iconbtn { border: none; background: none; font-size: 20px; cursor: pointer; padding: 6px; flex-shrink: 0; color: var(--text); }
   .iconbtn:active { transform: scale(0.92); }
   .btnround { border: none; border-radius: 50%; width: 40px; height: 40px; font-size: 16px; cursor: pointer; flex-shrink: 0;
@@ -259,8 +260,8 @@ const gate = $('gate'), app = $('app'), audio = $('audio');
 function esc(s) { return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmt(s) { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function skey(s) { return ((s.title || '') + '|' + (s.artist || '')).toLowerCase(); }
-function streamUrl(s) { return '/api/stream?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist); }
-function dlUrl(s) { return '/api/download?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist); }
+function streamUrl(s) { return '/api/stream?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist) + (s.ytid ? '&ytid=' + encodeURIComponent(s.ytid) : ''); }
+function dlUrl(s) { return '/api/download?title=' + encodeURIComponent(s.title) + '&artist=' + encodeURIComponent(s.artist) + (s.ytid ? '&ytid=' + encodeURIComponent(s.ytid) : ''); }
 function fileName(s) { return ((s.title || '') + ' - ' + (s.artist || '')).replace(/[^\w\s\-()]/g, '').trim().slice(0, 80) + '.mp3'; }
 
 async function apiGet(path) {
@@ -479,7 +480,7 @@ function songRow(s, listId, idx, opts) {
   return `<div class="song">
     <div class="art">🎵</div>
     <div class="info" onclick="uiPlay('${listId}',${idx})" style="cursor:pointer">
-      <div class="title">${esc(s.title)} ${s.cached ? '<span class="flash">⚡</span>' : ''}</div>
+      <div class="title">${esc(s.title)} ${s.cached ? '<span class="flash">⚡</span>' : ''}${s.ytid ? ' <span class="yt">YT</span>' : ''}</div>
       <div class="meta">${esc(s.artist)}${s.duration ? ' • ' + fmt(s.duration) : ''}</div>
     </div>${btns}</div>`;
 }

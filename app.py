@@ -292,7 +292,7 @@ def ensure_media(title, artist, ytid=None):
     return None, "not_found"
 
 
-# ---------------- Artist routing (bot parity: 530 curated artists) ----------------
+# ---------------- Artist routing (bot parity: 596 curated artists) ----------------
 # Bot (dl_listen.py) pehle query ko curated artist list se fuzzy-match karta hai
 # (threshold > 0.4). dl_listen ko import nahi karte — logic port kiya gaya hai.
 ARTISTS_FILE = os.path.join(BASE, "artists.json")
@@ -370,23 +370,148 @@ def _all_artists_flat():
 
 
 def artist_route(query):
-    """Bot jaisa artist routing. Achha match (>0.4) mile to
-    {"artist", "industry", "category"} warna None (tab song search)."""
+    """Bot jaisa artist routing: _artist_fuzzy top_n=8, score > 0.4 ->
+    {"artists": [{"name","industry","category"}], "query": q} — FULL pick list
+    (bot ke art:pick button rows jaisa).
+    Koi achha match na mile to None (tab song search)."""
     try:
         flat = _all_artists_flat()
         if not flat:
             return None
-        matches = _artist_fuzzy(query, [n for n, _, _ in flat], top_n=3)
-        good = [(n, s) for n, s in matches if s > 0.4]
-        if not good:
-            return None
-        best = good[0][0]
+        meta = {}
         for n, ind, cat in flat:
-            if n == best:
-                return {"artist": n, "industry": ind, "category": cat}
+            meta.setdefault(n, (ind, cat))
+        seen = set()
+        picks = []
+        for n, s in _artist_fuzzy(query, [n for n, _, _ in flat], top_n=8):
+            if s > 0.4 and n not in seen:
+                seen.add(n)
+                ind, cat = meta.get(n, ("", ""))
+                picks.append({"name": n, "industry": ind, "category": cat})
+        if not picks:
+            return None
+        return {"artists": picks, "query": query}
+    except Exception:
+        return None
+
+
+# ---------------- Bot-parity iTunes song search ----------------
+# Bot ka dl_engine (bin/) render wali copy se NAYA hai: strict title_matches
+# (TITLE ka match zaroori — artist-only match kabhi nahi; Om 2026-10-06) aur
+# trackTimeMillis se "m:ss" duration. Render wali dl_engine copy purani hai
+# (kamzor filter -> Sanam band ke covers, duration nahi). Bot code read-only
+# hai, isliye bot ka function yahin port kiya gaya hai.
+_BOT_TITLE_JUNK = ("karaoke", "instrumental", "backing track", "minus one")
+
+
+def _bot_norm_words(s):
+    """Lowercase words, bracketed suffixes hatao, repeated letters collapse
+    (yaara->yara) — bot ke dl_engine._norm_words jaisa."""
+    s = (s or "").lower()
+    s = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", s)
+    s = re.sub(r"[^a-z0-9 ]", " ", s)
+    words = []
+    for w in s.split():
+        w = re.sub(r"(.)\1+", r"\1", w)
+        if w:
+            words.append(w)
+    return words
+
+
+def _bot_title_matches(query, title, artist=""):
+    """Bot wala iTunes filter: query ke shabd TITLE me milne chahiye.
+    'sanam hai' par Sanam band ke covers bahar, sirf 'O Sanam' andar."""
+    tl = (title or "").lower()
+    if any(j in tl for j in _BOT_TITLE_JUNK):
+        return False
+    qw = set(_bot_norm_words(query))
+    # Parentheses ka hissa extra info hai — core title lo
+    core = re.sub(r"\(.*?\)", "", title or "").strip()
+    tw = set(_bot_norm_words(core or title))
+    if not qw or not tw:
+        return False
+    # 4+ akshar wale shabd significant hain ("the", "se" ignore)
+    tw_sig = {w for w in tw if len(w) >= 4}
+    if not tw_sig:
+        tw_sig = tw
+    # Core title ke saare significant shabd query me hon -> pakka match
+    if tw_sig <= qw:
+        return True
+    # Ya kam se kam 2 significant shabd milen
+    if len(tw_sig & qw) >= min(2, len(tw_sig)):
+        return True
+    return False
+
+
+def _bot_web_song_search(query, n=5):
+    """Bot ke dl_engine.web_song_search ka exact port: iTunes Search API,
+    [{'title','artist','duration'('m:ss')}], strict title filter, max n.
+    Empty list on any failure (caller falls back)."""
+    try:
+        params = urllib.parse.urlencode({
+            "term": query, "media": "music", "entity": "song",
+            "limit": n * 3, "country": "IN"})
+        req = urllib.request.Request(
+            "https://itunes.apple.com/search?" + params,
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.load(resp)
+    except Exception:
+        return []
+    out, seen = [], set()
+    for t in data.get("results", []):
+        title = (t.get("trackName") or "").strip()
+        artist = (t.get("artistName") or "").strip()
+        if not title:
+            continue
+        key = (title + "|" + artist).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if not _bot_title_matches(query, title, artist):
+            continue
+        dur_s = ""
+        try:
+            ms = int(t.get("trackTimeMillis") or 0)
+            if ms > 0:
+                dur_s = f"{ms // 60000}:{(ms // 1000) % 60:02d}"
+        except (ValueError, TypeError):
+            pass
+        out.append({"title": title, "artist": artist, "duration": dur_s})
+        if len(out) >= n:
+            break
+    return out
+
+
+def _mss_to_secs(dur):
+    """'m:ss' / 'h:mm:ss' / int -> int seconds (iTunes + YouTube durations)."""
+    if isinstance(dur, (int, float)):
+        return int(dur)
+    if dur is None:
+        return 0
+    m = re.match(r"(?:(\d+):)?(\d+):(\d+)$", str(dur).strip())
+    if not m:
+        try:
+            return int(float(dur))
+        except (TypeError, ValueError):
+            return 0
+    h, mn, s = m.groups()
+    return int(h or 0) * 3600 + int(mn) * 60 + int(s)
+
+
+def _is_cached(title, artist):
+    """Bot ka ⚡: tg_cache me (exact key ya smart match) ya MEDIA_DIR me file."""
+    try:
+        if tg_cache_lookup(title, artist) is not None:
+            return True
     except Exception:
         pass
-    return None
+    try:
+        p = os.path.join(MEDIA_DIR,
+                         safe_key((title + "|" + artist).lower()) + ".mp3")
+        return os.path.exists(p) and os.path.getsize(p) > 50 * 1024
+    except Exception:
+        return False
 
 
 def send_range(path, download_name=None):
@@ -466,130 +591,76 @@ def verify():
 
 
 def bot_song_search(q):
-    """Ranked song search (iTunes + JioSaavn + YouTube, bot wali scoring).
+    """Bot ka song path (dl_listen.song_search ke steps ka exact port):
+    1) iTunes (_bot_web_song_search — bot wale strict title filter ke saath,
+       max 5, saaf names)
+    1b) iTunes khaali ho to JioSaavn (dl_engine.jiosaavn_search, max 5)
+    2) dono khaali hon to YouTube (dl_engine.yt_search, max 5)
+    Pehla non-empty source wins — kabhi merge nahi, koi scoring nahi.
     /api/search aur /api/botsearch dono use karte hain."""
-    # 0. iTunes se sahi gaane nikalo (bot jaisa) — sabse upar dikhenge
-    itunes_hits = []
+    # 1) iTunes
+    itunes = []
     try:
-        itunes_hits = dl_engine.web_song_search(q, n=5)
+        itunes = _bot_web_song_search(q, 5)
     except Exception:
-        pass
+        itunes = []
+    if itunes:
+        return [{
+            "key": (h["title"] + "|" + h["artist"]).lower(),
+            "title": h["title"], "artist": h["artist"],
+            "duration": _mss_to_secs(h.get("duration")),
+            "image": "",  # iTunes ke paas cover URL nahi
+            "cached": _is_cached(h["title"], h["artist"]),
+        } for h in itunes[:5]]
 
-    def relevance(title, artist):
-        """Query se kitna milta hai — zyada score = upar dikhega."""
-        qt = re.sub(r"[^a-z0-9 ]", "", q.lower())
-        tt = re.sub(r"[^a-z0-9 ]", "", (title or "").lower())
-        qw = [w for w in qt.split() if len(w) > 1]
-        if not qw:
-            return 0
-        score = 0
-        # exact title match sabse upar
-        if qt == tt:
-            score += 100
-        # title query se shuru ho
-        if tt.startswith(qt):
-            score += 50
-        # kitne query words title me hain
-        hits = sum(1 for w in qw if w in tt)
-        score += hits * 10
-        # saare words mile to bonus
-        if hits == len(qw):
-            score += 20
-        return score
-
-    out = []
-    for h in dl_engine.jiosaavn_search(q, n=10):
-        t, a = h.get("title", ""), h.get("artist", "")
-        dur = h.get("duration")
-        try:
-            dur = int(dur) if dur else 0
-        except (TypeError, ValueError):
-            dur = 0
-        # local cache check
-        key = (t + "|" + a).lower()
-        cpath = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
-        cached = os.path.exists(cpath) and os.path.getsize(cpath) > 50 * 1024
-        out.append({
-            "key": key, "title": t, "artist": a,
-            "duration": dur, "cached": cached,
-            "image": h.get("image", ""),
-            "_score": relevance(t, a),
-        })
-    out.sort(key=lambda x: x["_score"], reverse=True)
-    # YouTube results hamesha lao (bot wali smart scoring ke saath)
-    _JUNK = ("live", "reaction", "cover", "1 hour", "1hour", "loop",
-             "8d audio", "slowed", "sped up", "ringtone", "status",
-             "whatsapp", "dj remix", "mashup")
-    _GOOD = ("topic", "vevo", "official", "music", "records",
-             "t-series", "sony", "zee", "tips", "saregama")
+    # 1b) JioSaavn fallback
+    js = []
     try:
-        import re as _re
-        qwords = [w for w in _re.findall(r"[a-z0-9]+", q.lower())
-                  if len(w) >= 3 and w not in ("song", "the", "from", "with")]
-        for v in dl_engine.yt_search(q + " song", n=8):
-            vid = v.get("id", "")
-            t = v.get("title", "") or "video"
-            a = v.get("uploader", "")
-            tl, ul = t.lower(), (a or "").lower()
-            # Bot wali scoring
-            ys = 0
-            if any(j in tl for j in _JUNK):
-                ys -= 50
-            if any(g in ul for g in _GOOD):
-                ys += 10
-            if "official" in tl:
-                ys += 5
-            for w in qwords:
-                if w in tl:
-                    ys += 2
-            dur = 0
+        js = dl_engine.jiosaavn_search(q, 5) or []
+    except Exception:
+        js = []
+    if js:
+        out = []
+        for h in js[:5]:
+            t = (h.get("title") or "").strip()
+            a = (h.get("artist") or "").strip()
+            if not t:
+                continue
             try:
-                parts = (v.get("duration") or "").split(":")
-                for p in parts:
-                    dur = dur * 60 + int(p)
-            except (ValueError, TypeError):
+                dur = int(h.get("duration")) if h.get("duration") else 0
+            except (TypeError, ValueError):
                 dur = 0
-            if dur > 2700:
-                continue
-            if 120 <= dur <= 480:
-                ys += 5
-            elif dur > 600:
-                ys -= 20
-            # Base score + smart scoring
-            score = 15 + ys
-            if score < 0:
-                continue
-            key = ("yt:" + vid).lower()
-            # Duplicate na ho
-            if any(x.get("ytid") == vid for x in out):
-                continue
             out.append({
-                "key": key, "title": t, "artist": a,
-                "duration": dur, "cached": False,
-                "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                "ytid": vid, "_score": score,
+                "key": (t + "|" + a).lower(),
+                "title": t, "artist": a,
+                "duration": dur,
+                "image": h.get("image") or "",
+                "cached": _is_cached(t, a),
             })
+        if out:
+            return out
+
+    # 2) YouTube fallback
+    yt = []
+    try:
+        yt = dl_engine.yt_search(q, 5) or []
     except Exception:
-        pass
-    # iTunes ke sahi gaane sabse upar (bot jaisa)
-    for h in itunes_hits:
-        t, a = h.get("title", ""), h.get("artist", "")
-        if not t:
+        yt = []
+    out = []
+    for v in yt[:5]:
+        vid = (v.get("id") or "").strip()
+        if not vid:
             continue
-        # Duplicate na ho
-        if any(x.get("title", "").lower() == t.lower() for x in out):
-            continue
-        key = (t + "|" + a).lower()
-        cpath = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
-        cached = os.path.exists(cpath) and os.path.getsize(cpath) > 50 * 1024
+        t = (v.get("title") or "").strip() or "video"
+        a = (v.get("uploader") or "").strip()
         out.append({
-            "key": key, "title": t, "artist": a,
-            "duration": 0, "cached": cached,
-            "image": "", "_score": 200,
+            "key": ("yt:" + vid).lower(),
+            "title": t, "artist": a,
+            "duration": _mss_to_secs(v.get("duration")),
+            "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+            "ytid": vid,
+            "cached": _is_cached(t, a),
         })
-    out.sort(key=lambda x: x["_score"], reverse=True)
-    for x in out:
-        del x["_score"]
     return out
 
 
@@ -603,8 +674,10 @@ def search():
 
 @app.route("/api/botsearch")
 def botsearch():
-    """Bot jaisa search: pehle 530 curated artists me fuzzy match (score > 0.4).
-    Artist mile to {"type":"artist", ...}, warna /api/search wale results."""
+    """Bot jaisa search: pehle 596 curated artists me fuzzy match (top_n=8,
+    score > 0.4). Artist mile to FULL pick list
+    {"type":"artist","artists":[{"name","industry","category"}...],"query":q},
+    warna bot wale song path ke results."""
     q = (request.args.get("q") or "").strip()
     if not q:
         return jsonify({"type": "songs", "results": []})
@@ -612,6 +685,47 @@ def botsearch():
     if art:
         return jsonify({"type": "artist", **art})
     return jsonify({"type": "songs", "results": bot_song_search(q)})
+
+
+@app.route("/api/artist_songs")
+def artist_songs():
+    """Artist ke top gaane — bot ke show_artist ka exact port:
+    dl_engine.jiosaavn_artist_songs(artist, 30),
+    fallback dl_engine.jiosaavn_search(artist, 10).
+    Auth + rate limit baaki /api/* routes jaisa (before_request _gate)."""
+    name = (request.args.get("artist") or "").strip()
+    if not name:
+        return jsonify({"error": "artist chahiye"}), 400
+    songs = []
+    try:
+        songs = dl_engine.jiosaavn_artist_songs(name, 30) or []
+    except Exception:
+        songs = []
+    if not songs:
+        # Artist page khaali ho to naam se song search (bot jaisa)
+        try:
+            for r in dl_engine.jiosaavn_search(name, 10) or []:
+                t = (r.get("title") or "").strip()
+                a = (r.get("artist") or "").strip()
+                if t:
+                    songs.append({
+                        "title": t, "artist": a, "enc": r.get("enc", ""),
+                        "image": r.get("image", ""),
+                        "duration": r.get("duration")})
+        except Exception:
+            songs = []
+    out = []
+    for s in songs:
+        t = (s.get("title") or "").strip()
+        if not t:
+            continue
+        try:
+            dur = int(s.get("duration")) if s.get("duration") else 0
+        except (TypeError, ValueError):
+            dur = 0
+        out.append({"title": t, "artist": (s.get("artist") or "").strip(),
+                    "duration": dur, "image": s.get("image") or ""})
+    return jsonify({"artist": name, "songs": out})
 
 
 @app.route("/api/stream")

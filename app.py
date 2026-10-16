@@ -25,7 +25,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-16.3-search-parity"
+BACKEND_VERSION = "2026-10-16.4-artist-full"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -694,15 +694,54 @@ def botsearch():
     return jsonify({"type": "songs", "results": bot_song_search(q)})
 
 
+ARTIST_SONGS_V3_FILE = os.path.join(BASE, "artist_songs_bot_v3.json")
+_artist_songs_v3 = None
+
+
+def _load_artist_songs_v3():
+    """Bot ki official artist song lists (artist_songs_bot_v3.json)."""
+    global _artist_songs_v3
+    if _artist_songs_v3 is None:
+        _artist_songs_v3 = _load_json_file(ARTIST_SONGS_V3_FILE, {})
+    return _artist_songs_v3
+
+
+def _accurate_artist_songs(artist_name):
+    """Bot ke _get_accurate_artist_songs ka port: official lists se
+    artist ke SAARE gaane [{title, artist}]."""
+    data = _load_artist_songs_v3()
+    if not data:
+        return None
+    qn = (artist_name or "").strip().lower()
+    for key, songs in data.items():
+        parts = key.split("|")
+        aname = parts[2] if len(parts) > 2 else key
+        if aname.strip().lower() == qn:
+            return [{"title": (s.get("title") or "").strip(), "artist": artist_name}
+                    for s in songs if (s.get("title") or "").strip()]
+    return None
+
+
 @app.route("/api/artist_songs")
 def artist_songs():
-    """Artist ke top gaane — bot ke show_artist ka exact port:
+    """Artist ke SAARE gaane — bot ke Artist Browser jaisa:
+    pehle accurate official list (100+ gaane), nahi mili to
     dl_engine.jiosaavn_artist_songs(artist, 30),
     fallback dl_engine.jiosaavn_search(artist, 10).
+    Har gaane par cached flag (bot ka ⚡).
     Auth + rate limit baaki /api/* routes jaisa (before_request _gate)."""
     name = (request.args.get("artist") or "").strip()
     if not name:
         return jsonify({"error": "artist chahiye"}), 400
+    out = []
+    acc = _accurate_artist_songs(name)
+    if acc:
+        for s in acc:
+            t = s["title"]
+            out.append({"title": t, "artist": name,
+                        "duration": 0, "image": "",
+                        "cached": _is_cached(t, name)})
+        return jsonify({"artist": name, "songs": out})
     songs = []
     try:
         songs = dl_engine.jiosaavn_artist_songs(name, 30) or []

@@ -36,6 +36,31 @@ DATA_DIR = os.environ.get("DATA_DIR", BASE)
 PLAYLISTS_FILE = os.path.join(DATA_DIR, "playlists.json")
 LIKED_FILE = os.path.join(DATA_DIR, "liked.json")
 
+# In-memory rate limiting (free-tier protection; fail-open on any error)
+_RL = {}
+
+
+def _rate_ok(key, limit, window=60.0):
+    """Sliding-window rate limit. Koi error ho to allow (kabhi block mat karo)."""
+    try:
+        import time
+        now = time.time()
+        ts = _RL.get(key)
+        if ts is None:
+            ts = []
+            _RL[key] = ts
+        while ts and ts[0] <= now - window:
+            ts.pop(0)
+        if len(ts) >= limit:
+            return False
+        ts.append(now)
+        return True
+    except Exception:
+        return True
+
+
+_app_tokens = {}
+
 # Trending charts (JioSaavn playlist IDs, bot wale hi)
 TREND_CHARTS = {
     "hindi": ("Hindi Top 50", "1134543272"),
@@ -267,6 +292,103 @@ def ensure_media(title, artist, ytid=None):
     return None, "not_found"
 
 
+# ---------------- Artist routing (bot parity: 530 curated artists) ----------------
+# Bot (dl_listen.py) pehle query ko curated artist list se fuzzy-match karta hai
+# (threshold > 0.4). dl_listen ko import nahi karte — logic port kiya gaya hai.
+ARTISTS_FILE = os.path.join(BASE, "artists.json")
+_artists_data = None
+
+_ARTIST_JUNK = {"topic", "official", "music", "vevo", "records", "label",
+                "audio", "video", "channel"}
+
+
+def load_artists():
+    """artists.json -> {industry: {category: [names]}}. Memory me cached."""
+    global _artists_data
+    if _artists_data is not None:
+        return _artists_data
+    try:
+        with open(ARTISTS_FILE, encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict) and d:
+            _artists_data = d
+            return d
+    except (OSError, ValueError):
+        pass
+    _artists_data = {}
+    return {}
+
+
+def _canon_artist_words(a):
+    return {w for w in re.findall(r"[a-z]+", (a or "").lower())
+            if w not in _ARTIST_JUNK}
+
+
+def _artist_fuzzy(query, candidates, top_n=5):
+    """Spelling mistakes sambhalo: word-overlap + char similarity.
+    'Arjit Singh' -> 'Arijit Singh'. Top N [(name, score)]."""
+    qw = _canon_artist_words(query)
+    if not qw:
+        return []
+    qn = dl_engine._norm_name(query)
+    scored = []
+    for name in candidates:
+        nw = _canon_artist_words(name)
+        if not nw:
+            continue
+        inter = len(qw & nw)
+        union = len(qw | nw)
+        jaccard = inter / union if union else 0
+        nn = dl_engine._norm_name(name)
+        bonus = 0.0
+        if qn == nn:
+            bonus = 1.0
+        elif qn and nn and (qn in nn or nn in qn):
+            bonus = 0.5
+        seq = 0.0
+        if len(qn) >= 3 and len(nn) >= 3:
+            import difflib
+            seq = difflib.SequenceMatcher(None, qn, nn).ratio()
+        score = jaccard * 0.5 + bonus * 0.3 + seq * 0.2
+        if score > 0.15:
+            scored.append((name, score))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:top_n]
+
+
+def _all_artists_flat():
+    """[(name, industry, category)] — poori curated list."""
+    d = load_artists()
+    out = []
+    for ind, cats in d.items():
+        if not isinstance(cats, dict):
+            continue
+        for cat, names in cats.items():
+            for n in names or []:
+                out.append((n, ind, cat))
+    return out
+
+
+def artist_route(query):
+    """Bot jaisa artist routing. Achha match (>0.4) mile to
+    {"artist", "industry", "category"} warna None (tab song search)."""
+    try:
+        flat = _all_artists_flat()
+        if not flat:
+            return None
+        matches = _artist_fuzzy(query, [n for n, _, _ in flat], top_n=3)
+        good = [(n, s) for n, s in matches if s > 0.4]
+        if not good:
+            return None
+        best = good[0][0]
+        for n, ind, cat in flat:
+            if n == best:
+                return {"artist": n, "industry": ind, "category": cat}
+    except Exception:
+        pass
+    return None
+
+
 def send_range(path, download_name=None):
     size = os.path.getsize(path)
     rh = request.headers.get("Range")
@@ -317,13 +439,20 @@ def _gate():
         # Token se bhi auth chalega (native app ke liye)
         tok = request.args.get("token") or request.headers.get("X-App-Token")
         if tok and tok in _app_tokens:
+            if not _rate_ok("tok:" + tok, 240):
+                return jsonify({"error": "rate_limited"}), 429
             return None
         if not session.get("authed"):
             return jsonify({"error": "unauthorized"}), 401
+        if not _rate_ok("ip:" + (request.remote_addr or "?"), 120):
+            return jsonify({"error": "rate_limited"}), 429
 
 
 @app.route("/api/verify", methods=["POST"])
 def verify():
+    # Brute-force guard (fail-open: limit check fail ho to allow)
+    if not _rate_ok("verify:" + (request.remote_addr or "?"), 10):
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
     data = request.get_json(silent=True) or {}
     if data.get("code") == APP_CODE and APP_CODE:
         session["authed"] = True
@@ -336,15 +465,9 @@ def verify():
     return jsonify({"ok": False}), 401
 
 
-_app_tokens = {}
-
-
-@app.route("/api/search")
-def search():
-    q = (request.args.get("q") or "").strip()
-    if not q:
-        return jsonify({"results": []})
-
+def bot_song_search(q):
+    """Ranked song search (iTunes + JioSaavn + YouTube, bot wali scoring).
+    /api/search aur /api/botsearch dono use karte hain."""
     # 0. iTunes se sahi gaane nikalo (bot jaisa) — sabse upar dikhenge
     itunes_hits = []
     try:
@@ -354,7 +477,6 @@ def search():
 
     def relevance(title, artist):
         """Query se kitna milta hai — zyada score = upar dikhega."""
-        import re
         qt = re.sub(r"[^a-z0-9 ]", "", q.lower())
         tt = re.sub(r"[^a-z0-9 ]", "", (title or "").lower())
         qw = [w for w in qt.split() if len(w) > 1]
@@ -468,7 +590,28 @@ def search():
     out.sort(key=lambda x: x["_score"], reverse=True)
     for x in out:
         del x["_score"]
-    return jsonify({"results": out})
+    return out
+
+
+@app.route("/api/search")
+def search():
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"results": []})
+    return jsonify({"results": bot_song_search(q)})
+
+
+@app.route("/api/botsearch")
+def botsearch():
+    """Bot jaisa search: pehle 530 curated artists me fuzzy match (score > 0.4).
+    Artist mile to {"type":"artist", ...}, warna /api/search wale results."""
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"type": "songs", "results": []})
+    art = artist_route(q)
+    if art:
+        return jsonify({"type": "artist", **art})
+    return jsonify({"type": "songs", "results": bot_song_search(q)})
 
 
 @app.route("/api/stream")

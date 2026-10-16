@@ -24,6 +24,8 @@ import dl_engine
 from flask import Flask, request, session, jsonify, Response, send_from_directory
 
 APP_CODE = os.environ.get("APP_CODE", "")
+# Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
+BACKEND_VERSION = "2026-10-16.3-search-parity"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -560,7 +562,7 @@ def send_range(path, download_name=None):
 
 @app.before_request
 def _gate():
-    if request.path.startswith("/api/") and request.path != "/api/verify":
+    if request.path.startswith("/api/") and request.path not in ("/api/verify", "/api/version"):
         # Token se bhi auth chalega (native app ke liye)
         tok = request.args.get("token") or request.headers.get("X-App-Token")
         if tok and tok in _app_tokens:
@@ -571,6 +573,11 @@ def _gate():
             return jsonify({"error": "unauthorized"}), 401
         if not _rate_ok("ip:" + (request.remote_addr or "?"), 120):
             return jsonify({"error": "rate_limited"}), 429
+
+
+@app.route("/api/version")
+def version():
+    return jsonify({"version": BACKEND_VERSION})
 
 
 @app.route("/api/verify", methods=["POST"])

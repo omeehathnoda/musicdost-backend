@@ -25,7 +25,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-16.4-artist-full"
+BACKEND_VERSION = "2026-10-16.5-artist-dur"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -736,10 +736,24 @@ def artist_songs():
     out = []
     acc = _accurate_artist_songs(name)
     if acc:
+        # Durations: JioSaavn artist top-30 se match karke bharo (1 extra call).
+        dur_map = {}
+        try:
+            for r in dl_engine.jiosaavn_artist_songs(name, 30) or []:
+                rt = (r.get("title") or "").strip().lower()
+                rd = r.get("duration")
+                if rt and rd:
+                    try:
+                        dur_map[rt] = int(rd)
+                    except (TypeError, ValueError):
+                        pass
+        except Exception:
+            pass
         for s in acc:
             t = s["title"]
             out.append({"title": t, "artist": name,
-                        "duration": 0, "image": "",
+                        "duration": dur_map.get(t.strip().lower(), 0),
+                        "image": "",
                         "cached": _is_cached(t, name)})
         return jsonify({"artist": name, "songs": out})
     songs = []

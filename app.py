@@ -25,7 +25,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-17.4-trending-art"
+BACKEND_VERSION = "2026-10-17.5-report"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -838,6 +838,263 @@ def download():
     if not path:
         return jsonify({"error": err}), 404
     return send_range(path, download_name=f"{title} - {artist}")
+
+
+@app.route("/api/report", methods=["POST"])
+def report():
+    """Wrong-song report (Om ka order 2026-10-17): Now Playing me report
+    button -> {"reason": "wrong_song", "title": ..., "artist": ...}.
+
+    Flow: poisoned Telegram-cache entry evict karo -> fresh VERIFIED
+    download (Telegram cache SKIP — wahi galat hai; JioSaavn-first,
+    title+artist match, 2.5s duration rule — Om ke universal rules) ->
+    sahi file channel me sendAudio (replace) -> runtime cache update.
+    App ko turant bajane ke liye stream_url wapas milta hai.
+    """
+    data = request.get_json(silent=True) or {}
+    reason = (data.get("reason") or "").strip()
+    title = (data.get("title") or "").strip()
+    artist = (data.get("artist") or "").strip()
+    if reason != "wrong_song" or not title:
+        return jsonify({"ok": False, "error": "reason/title chahiye"}), 400
+    key = (title + "|" + artist).lower()
+
+    # 1. Evict poisoned entries (runtime cache + disk cache + local mp3)
+    global _tg_cache
+    try:
+        if _tg_cache is not None:
+            _tg_cache.pop(key, None)
+    except Exception:
+        pass
+    try:
+        d = _load_json_file(TG_CACHE_FILE, {})
+        if key in d:
+            del d[key]
+            with open(TG_CACHE_FILE, "w") as f:
+                json.dump(d, f)
+    except Exception:
+        pass
+    try:
+        lp = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
+        if os.path.exists(lp):
+            os.remove(lp)
+    except Exception:
+        pass
+
+    # 2. Fresh VERIFIED download (Telegram cache skip)
+    path, err = _fresh_verified_media(title, artist)
+    if not path:
+        return jsonify({"ok": False,
+                        "error": err or "sahi gaana nahi mila"}), 404
+
+    # 3. Channel me replace (sahi file upload)
+    fid, mid = _channel_replace_upload(path, title, artist)
+
+    # 4. Runtime cache update (agla /api/stream turant sahi file dega)
+    if fid:
+        try:
+            if _tg_cache is None:
+                _tg_cache = {}
+            _tg_cache[key] = fid
+            d = _load_json_file(TG_CACHE_FILE, {})
+            d[key] = fid
+            with open(TG_CACHE_FILE, "w") as f:
+                json.dump(d, f)
+        except Exception:
+            pass
+
+    import urllib.parse
+    stream_url = ("/api/stream?title=" + urllib.parse.quote(title) +
+                  "&artist=" + urllib.parse.quote(artist))
+    return jsonify({"ok": True, "key": key, "file_id": fid or "",
+                    "message_id": mid or 0, "stream_url": stream_url})
+
+
+_REPORT_JUNK = ("cover", "remix", "karaoke", "instrumental", "lofi",
+                "slowed", "sped", "amapiano", "acoustic", "unplugged",
+                "reprise", "tribute", "mashup", "dj ", "version", "8d",
+                "1 hour", "ringtone", "whatsapp status")
+
+
+def _report_words(s):
+    return [w for w in re.findall(r"[a-z0-9]+", (s or "").lower())
+            if len(w) > 1 and w != "the"]
+
+
+def _report_strict_match(title, artist, hit):
+    """Om ke universal rules (2026-10-15): sirf sahi artist ka official
+    version — cover/remix/karaoke/instrumental/lofi/slowed waghera auto-skip.
+    title_matches() bahut dheela hai (sirf title dekhta hai), isliye report
+    flow me ye strict check lagta hai."""
+    ht = (hit.get("title") or "").lower()
+    ha = (hit.get("artist") or "").lower()
+    if any(j in ht for j in _REPORT_JUNK):
+        return False
+    tw = _report_words(title)
+    hw = set(_report_words(ht))
+    if not tw or not all(w in hw for w in tw):
+        return False
+    aw = _report_words(artist)
+    if aw and not any(w in set(_report_words(ha)) for w in aw):
+        return False
+    return True
+
+
+def _report_expected_duration(title, artist):
+    """iTunes se official duration (2.5s rule ke liye expected)."""
+    try:
+        import urllib.request
+        import urllib.parse
+        params = urllib.parse.urlencode({
+            "term": f"{title} {artist}", "media": "music",
+            "entity": "song", "limit": 5, "country": "IN"})
+        req = urllib.request.Request(
+            "https://itunes.apple.com/search?" + params,
+            headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.load(resp)
+        for t in (data.get("results") or []):
+            tn = (t.get("trackName") or "").lower()
+            an = (t.get("artistName") or "").lower()
+            if not _report_words(title) or not all(
+                    w in tn for w in _report_words(title)):
+                continue
+            aw = _report_words(artist)
+            if aw and not any(w in an for w in aw):
+                continue
+            ms = t.get("trackTimeMillis")
+            if ms:
+                return float(ms) / 1000.0
+    except Exception:
+        pass
+    return None
+
+
+def _fresh_verified_media(title, artist):
+    """Telegram cache SKIP karke fresh verified MP3 lao.
+    Returns (path, err). Om ke universal rules: title+artist match,
+    2.5s duration rule.
+    """
+    import tempfile
+    import shutil
+    tmpdir = tempfile.mkdtemp(prefix="report_", dir=MEDIA_DIR)
+    try:
+        # 1. JioSaavn (throttle nahi to)
+        if dl_engine.jiosaavn_usable():
+            try:
+                hits = dl_engine.jiosaavn_search(f"{title} {artist}", n=5)
+                for h in hits:
+                    if not _report_strict_match(title, artist, h):
+                        continue
+                    exp = h.get("duration")
+                    jp, _ = dl_engine.jiosaavn_download(
+                        h["enc"], tmpdir, title=title, artist=artist,
+                        image=h.get("image"), expected_duration=exp)
+                    if jp and os.path.exists(jp) and _report_duration_ok(
+                            jp, exp):
+                        return _report_finalize(jp, title, artist,
+                                               tmpdir), None
+            except Exception:
+                pass
+        # 2. YouTube fallback (artist-check wala yt_best_pick +
+        #    strict verification: junk-skip, 2.5s rule). Kai query
+        #    variants try karo — pehla query aksar lyrics video deta hai.
+        try:
+            exp = _report_expected_duration(title, artist)
+            for q in (f"{title} {artist} song",
+                      f"{artist} {title} official audio",
+                      f"{title} {artist} official"):
+                pick = None
+                try:
+                    pick = dl_engine.yt_best_pick(q)
+                except Exception:
+                    continue
+                if not pick or pick.get("duration_secs", 0) > 2700:
+                    continue
+                pt = (pick.get("title") or "").lower()
+                if any(j in pt for j in _REPORT_JUNK):
+                    continue
+                psecs = pick.get("duration_secs") or 0
+                if exp and abs(psecs - exp) > 2.5:
+                    continue
+                yp, _ = dl_engine.download_audio(pick["url"], tmpdir)
+                if (yp and os.path.exists(yp)
+                        and _report_duration_ok(yp, exp)):
+                    dl_engine.tag_audio_file(yp, title, artist)
+                    return _report_finalize(yp, title, artist,
+                                           tmpdir), None
+        except Exception:
+            pass
+    finally:
+        try:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass
+    return None, "sahi gaana nahi mila"
+
+
+def _report_duration_ok(path, expected):
+    """2.5s rule: downloaded file expected duration ke ±2.5s me honi chahiye."""
+    try:
+        if not expected:
+            return True
+        got = dl_engine.audio_duration(path)
+        return got and abs(got - float(expected)) <= 2.5
+    except Exception:
+        return False
+
+
+def _report_finalize(src, title, artist, tmpdir):
+    """Verified file ko MEDIA_DIR me rakho (key-based naam)."""
+    import shutil
+    key = (title + "|" + artist).lower()
+    dst = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
+    try:
+        os.replace(src, dst)
+    except OSError:
+        shutil.copy(src, dst)
+    return dst
+
+
+def _channel_replace_upload(path, title, artist):
+    """Sahi MP3 channel me bhejo (replace). Returns (file_id, message_id)."""
+    if not TG_BOT_TOKEN:
+        return None, None
+    try:
+        import urllib.request
+        import uuid
+        boundary = uuid.uuid4().hex
+        fields = {
+            "chat_id": "-1003960695955",
+            "title": title[:100],
+            "performer": artist[:100],
+        }
+        body = bytearray()
+        for k, v in fields.items():
+            body += f"--{boundary}\r\n".encode()
+            body += (f'Content-Disposition: form-data; name="{k}"\r\n\r\n'
+                     ).encode()
+            body += f"{v}\r\n".encode()
+        with open(path, "rb") as f:
+            fdata = f.read()
+        body += f"--{boundary}\r\n".encode()
+        body += (b'Content-Disposition: form-data; name="audio"; '
+                 b'filename="song.mp3"\r\n'
+                 b"Content-Type: audio/mpeg\r\n\r\n")
+        body += fdata + b"\r\n"
+        body += f"--{boundary}--\r\n".encode()
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendAudio",
+            data=bytes(body),
+            headers={"Content-Type":
+                     f"multipart/form-data; boundary={boundary}"})
+        with urllib.request.urlopen(req, timeout=120) as r:
+            resp = json.load(r)
+        res = (resp or {}).get("result") or {}
+        audio = res.get("audio") or {}
+        return audio.get("file_id"), res.get("message_id")
+    except Exception:
+        return None, None
 
 
 @app.route("/api/prepare")

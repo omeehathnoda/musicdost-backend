@@ -189,9 +189,45 @@ def itunes_chart(country="us", n=50):
     for e in data.get("feed", {}).get("entry", [])[:n]:
         title = ((e.get("im:name") or {}).get("label") or "").strip()
         artist = ((e.get("im:artist") or {}).get("label") or "").strip()
+        # im:image: 55px / 60px / 170px variants — take the largest.
+        imgs = e.get("im:image") or []
+        img = (imgs[-1].get("label") or "").strip() if isinstance(imgs, list) and imgs else ""
+        # mzstatic thumb ko 600px tak upscale karo (lookup fail ka fallback).
+        if "/170x170bb." in img:
+            img = img.replace("/170x170bb.", "/600x600bb.")
+        tid = ((e.get("id") or {}).get("attributes") or {}).get("im:id", "")
         if title:
             out.append({"title": html.unescape(title),
-                        "artist": html.unescape(artist)})
+                        "artist": html.unescape(artist),
+                        "image": img, "tid": str(tid or "")})
+    return out
+
+
+def itunes_track_meta(tids):
+    """Batched iTunes lookup: {trackId: {'duration': sec, 'image': 600px}}.
+
+    Ek hi HTTP call me ~200 tracks tak ka trackTimeMillis + artwork.
+    Trending English chart ke liye (RSS me duration nahi hota).
+    """
+    tids = [str(t) for t in tids if str(t).strip()]
+    if not tids:
+        return {}
+    try:
+        url = ("https://itunes.apple.com/lookup?id=" + ",".join(tids[:200]) +
+               "&entity=song&limit=200")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.load(resp)
+    except Exception:
+        return {}
+    out = {}
+    for r in data.get("results", []) or []:
+        tid = str(r.get("trackId") or "")
+        if not tid:
+            continue
+        ms = r.get("trackTimeMillis") or 0
+        art = (r.get("artworkUrl100") or "").replace("100x100", "600x600")
+        out[tid] = {"duration": int(ms // 1000) if ms else 0, "image": art}
     return out
 
 

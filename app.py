@@ -25,7 +25,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-17.2-artist-art"
+BACKEND_VERSION = "2026-10-17.3-artist-covers"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -710,6 +710,18 @@ def _load_artist_songs_v3():
     return _artist_songs_v3
 
 
+ARTIST_COVERS_FILE = os.path.join(BASE, "artist_covers.json")
+_artist_covers = None
+
+
+def _load_artist_covers():
+    """Batch backfill se bani covers map: 'artist|title' (lower) -> image URL."""
+    global _artist_covers
+    if _artist_covers is None:
+        _artist_covers = _load_json_file(ARTIST_COVERS_FILE, {})
+    return _artist_covers
+
+
 def _accurate_artist_songs(artist_name):
     """Bot ke _get_accurate_artist_songs ka port: official lists se
     artist ke SAARE gaane [{title, artist}]."""
@@ -759,12 +771,15 @@ def artist_songs():
                     img_map[rt] = ri
         except Exception:
             pass
+        covers = _load_artist_covers()
+        an = name.strip().lower()
         for s in acc:
             t = s["title"]
             tl = t.strip().lower()
             out.append({"title": t, "artist": name,
                         "duration": dur_map.get(tl, 0),
-                        "image": img_map.get(tl, ""),
+                        # pehle JioSaavn top-30 ka fresh cover, nahi to batch backfill
+                        "image": img_map.get(tl) or covers.get(an + "|" + tl, ""),
                         "cached": _is_cached(t, name)})
         return jsonify({"artist": name, "songs": out})
     songs = []

@@ -25,7 +25,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-16.5-artist-dur"
+BACKEND_VERSION = "2026-10-17.1-itunes-art"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -479,7 +479,11 @@ def _bot_web_song_search(query, n=5):
                 dur_s = f"{ms // 60000}:{(ms // 1000) % 60:02d}"
         except (ValueError, TypeError):
             pass
-        out.append({"title": title, "artist": artist, "duration": dur_s})
+        # iTunes har track ke saath cover bhejta hai (artworkUrl100);
+        # search rows ke liye 600x600 upscale (100x100 blurry lagega).
+        art = (t.get("artworkUrl100") or "").strip().replace("100x100", "600x600")
+        out.append({"title": title, "artist": artist, "duration": dur_s,
+                    "image": art})
         if len(out) >= n:
             break
     return out
@@ -616,7 +620,7 @@ def bot_song_search(q):
             "key": (h["title"] + "|" + h["artist"]).lower(),
             "title": h["title"], "artist": h["artist"],
             "duration": _mss_to_secs(h.get("duration")),
-            "image": "",  # iTunes ke paas cover URL nahi
+            "image": h.get("image") or "",  # iTunes artworkUrl100 (600x600)
             "cached": _is_cached(h["title"], h["artist"]),
         } for h in itunes[:5]]
 

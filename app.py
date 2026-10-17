@@ -25,7 +25,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-17.3-artist-covers"
+BACKEND_VERSION = "2026-10-17.4-trending-art"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -881,6 +881,16 @@ def trending():
     try:
         if cid.startswith("itunes:"):
             songs = dl_engine.itunes_chart(cid.split(":")[1])
+            # iTunes RSS me duration nahi hota — ek batched lookup se
+            # duration + 600px artwork bharo (2026-10-17.4).
+            if songs:
+                meta = dl_engine.itunes_track_meta([s.get("tid", "") for s in songs])
+                for s in songs:
+                    m = meta.get(str(s.get("tid", ""))) or {}
+                    if m.get("duration"):
+                        s["duration"] = m["duration"]
+                    if m.get("image"):
+                        s["image"] = m["image"]
             # iTunes fail ho to JioSaavn English chart try karo
             if not songs and lang == "english":
                 songs = dl_engine.jiosaavn_chart("1134543273", n=50)
@@ -889,7 +899,8 @@ def trending():
     except Exception:
         songs = []
     out = [{"title": s.get("title", ""), "artist": s.get("artist", ""),
-            "duration": 0, "image": s.get("image", "")} for s in (songs or [])[:50]]
+            "duration": s.get("duration", 0) or 0,
+            "image": s.get("image", "")} for s in (songs or [])[:50]]
     if out:
         _trend_cache[lang] = {"at": now, "songs": out}
     elif c:

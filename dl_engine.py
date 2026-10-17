@@ -169,6 +169,8 @@ def jiosaavn_chart(listid, n=50):
         if not title:
             continue
         img = (s.get("image") or "").strip()
+        # chhota cover (150x150) -> bada (500x500), warna player me blurry
+        img = re.sub(r"150x150", "500x500", img)
         out.append({"title": title, "artist": artist, "enc": enc,
                     "duration": _mi_duration(mi), "image": img})
     return out

@@ -25,7 +25,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-17.5-report"
+BACKEND_VERSION = "2026-10-18.6-playlist-resolve"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -927,6 +927,58 @@ def report():
                   "&artist=" + urllib.parse.quote(artist))
     return jsonify({"ok": True, "key": key, "file_id": fid or "",
                     "message_id": mid or 0, "stream_url": stream_url})
+
+
+@app.route("/api/playlist_resolve", methods=["GET", "POST"])
+def playlist_resolve():
+    """Playlist URL resolver (Om ka order 2026-10-18): Spotify/YouTube/
+    JioSaavn playlist link -> {ok, name, tracks: [{title, artist}]}.
+
+    Bot me ye pehle se hai (dl_engine.playlist_info), app ke backend me
+    nahi tha — v2.0 gap. App SearchScreen se playlist link paste par
+    ye endpoint call hota hai.
+    """
+    data = request.get_json(silent=True) or {}
+    url = (data.get("url") or request.args.get("url") or "").strip()
+    if not url:
+        return jsonify({"ok": False, "error": "url chahiye"}), 400
+    try:
+        result = dl_engine.playlist_info(url)
+    except Exception as e:
+        return jsonify({"ok": False,
+                        "error": "resolve fail: %s" % str(e)[:80]}), 500
+    if not result:
+        err = getattr(dl_engine, "last_playlist_error", "") or ""
+        msg = ("private/deleted playlist" if err == "private"
+               else "playlist samajh nahi aayi")
+        return jsonify({"ok": False, "error": msg}), 404
+    label, songs = result
+    tracks = [{"title": (s.get("title") or "").strip(),
+               "artist": (s.get("artist") or "").strip()}
+              for s in (songs or [])]
+    tracks = [t for t in tracks if t["title"]]
+    if not tracks:
+        return jsonify({"ok": False, "error": "koi gaana nahi mila"}), 404
+    # Playlist cover art (Spotify og:image; YouTube/JioSaavn ke liye khaali)
+    image = ""
+    try:
+        low = url.lower()
+        if "open.spotify.com" in low:
+            m = re.search(r"/playlist/([A-Za-z0-9]{22})", url)
+            if m:
+                req = urllib.request.Request(
+                    "https://open.spotify.com/playlist/" + m.group(1),
+                    headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    raw = resp.read().decode("utf-8", "ignore")
+                im = re.search(
+                    r'<meta property="og:image" content="([^"]+)"', raw)
+                if im:
+                    image = im.group(1)
+    except Exception:
+        pass
+    return jsonify({"ok": True, "name": label or "Playlist",
+                    "image": image, "tracks": tracks})
 
 
 _REPORT_JUNK = ("cover", "remix", "karaoke", "instrumental", "lofi",

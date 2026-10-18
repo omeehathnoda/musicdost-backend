@@ -199,13 +199,22 @@ def tg_download_file(file_id, dest_path):
         return False
 
 
-def ensure_media(title, artist, ytid=None):
-    """MP3 lao. Returns (path, err)."""
+def ensure_media(title, artist, ytid=None, for_download=False):
+    """MP3 lao. Returns (path, err).
+    for_download=True: ID3 me title/artist likho taaki downloaded file
+    doosre music players me bhi sahi naam/artist dikhaye (Om ka order
+    2026-10-18 — 'ye kahne ki baat nahi h'). Stream par tag nahi likhte
+    (fast path bana rahe)."""
     key = (title + "|" + artist).lower()
     if ytid:
         key = "yt:" + ytid
     path = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
     if os.path.exists(path) and os.path.getsize(path) > 50 * 1024:
+        if for_download:
+            try:
+                dl_engine.tag_audio_file(path, title, artist)
+            except Exception:
+                pass
         return path, None
     # Har request ke liye alag tmpdir (concurrent downloads na takraye)
     import tempfile
@@ -217,6 +226,11 @@ def ensure_media(title, artist, ytid=None):
             yp, _ = dl_engine.download_audio(
                 f"https://www.youtube.com/watch?v={ytid}", tmpdir)
             if yp and os.path.exists(yp):
+                if for_download:
+                    try:
+                        dl_engine.tag_audio_file(yp, title, artist)
+                    except Exception:
+                        pass
                 try:
                     os.replace(yp, path)
                 except OSError:
@@ -257,6 +271,11 @@ def ensure_media(title, artist, ytid=None):
     try:
         fid = tg_cache_lookup(title, artist)
         if fid and tg_download_file(fid, path):
+            if for_download:
+                try:
+                    dl_engine.tag_audio_file(path, title, artist)
+                except Exception:
+                    pass
             return path, None
     except Exception:
         pass
@@ -834,7 +853,7 @@ def download():
     ytid = (request.args.get("ytid") or "").strip() or None
     if not title:
         return jsonify({"error": "title chahiye"}), 400
-    path, err = ensure_media(title, artist, ytid=ytid)
+    path, err = ensure_media(title, artist, ytid=ytid, for_download=True)
     if not path:
         return jsonify({"error": err}), 404
     return send_range(path, download_name=f"{title} - {artist}")

@@ -32,7 +32,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-19.3-cache-miss-refresh"
+BACKEND_VERSION = "2026-10-19.4-bot-fallback"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -120,6 +120,53 @@ TG_CACHE_FILE = os.path.join(BASE, "tg_cache.json")
 # GitHub se fresh cache lao (deploy ka wait mat karo)
 TG_CACHE_URL = "https://raw.githubusercontent.com/omeehathnoda/musicdost-backend/main/tg_cache.json"
 _tg_cache_time = 0
+
+# Bot Fallback (Om 2026-10-19): Render par YouTube fail ho to bot (VM par,
+# jahan YouTube chalta hai) download karke channel me daal dega.
+# Backend failed requests ko yahan likhta hai, VM worker GitHub se padhta hai.
+PENDING_DOWNLOADS_FILE = os.path.join(BASE, "pending_downloads.json")
+PENDING_DOWNLOADS_URL = "https://raw.githubusercontent.com/omeehathnoda/musicdost-backend/main/pending_downloads.json"
+
+
+def _queue_bot_fallback(title, artist, key):
+    """Render par _fresh_verified_media fail ho to bot-fallback ke liye queue karo.
+
+    pending_downloads.json me entry add karo aur GitHub par push karo taaki
+    VM worker (jahan YouTube chalta hai) use utha sake. Background me push
+    hota hai — caller block nahi hota.
+    """
+    try:
+        entry = {"title": title, "artist": artist, "key": key,
+                 "timestamp": __import__("time").time()}
+        # Local file me add karo (dedupe by key)
+        try:
+            d = _load_json_file(PENDING_DOWNLOADS_FILE, [])
+            if not isinstance(d, list):
+                d = []
+            # Pehle se hai to skip
+            if any(e.get("key") == key for e in d if isinstance(e, dict)):
+                return
+            d.append(entry)
+            with open(PENDING_DOWNLOADS_FILE, "w") as f:
+                json.dump(d, f)
+        except Exception:
+            return
+        # GitHub par push karo (background thread, fail-open)
+        def _push():
+            try:
+                import subprocess
+                gh_bin = os.path.expanduser("~/workspace/skills/github/bin")
+                r = subprocess.run(
+                    ["python3", "gh.py", "upload", "omeehathnoda",
+                     "musicdost-backend", PENDING_DOWNLOADS_FILE,
+                     "pending_downloads.json"],
+                    cwd=gh_bin, capture_output=True, text=True, timeout=60)
+            except Exception:
+                pass
+        import threading
+        threading.Thread(target=_push, daemon=True).start()
+    except Exception:
+        pass
 
 def _refresh_tg_cache(force=False):
     """GitHub se latest tg_cache.json lao (1 ghante me ek baar; force=True par turant).
@@ -364,6 +411,11 @@ def _lazy_channel_cache_worker(title, artist, key):
             return
         vpath, err = _fresh_verified_media(title, artist)
         if not vpath or not os.path.exists(vpath):
+            # Bot Fallback: Render par na mile to bot try karega.
+            try:
+                _queue_bot_fallback(title, artist, key)
+            except Exception:
+                pass
             return
         if os.path.getsize(vpath) < 50 * 1024:
             return
@@ -489,6 +541,12 @@ def _cache_worker_loop():
                                                          artist)
                     if nfid:
                         _tg_cache_bind(key, nfid, nmid)
+                else:
+                    # Bot Fallback: Render par na mile to bot try karega.
+                    try:
+                        _queue_bot_fallback(title, artist, key)
+                    except Exception:
+                        pass
         except Exception:
             pass
         finally:
@@ -1243,8 +1301,14 @@ def _report_worker(title, artist, key):
         # 2. Fresh VERIFIED download (Telegram cache skip)
         path, err = _fresh_verified_media(title, artist)
         if not path:
+            # Bot Fallback (Om 2026-10-19): Render par fail ho to bot (VM)
+            # try karega. Status "bot_fetching" — app ko pata chalega.
+            try:
+                _queue_bot_fallback(title, artist, key)
+            except Exception:
+                pass
             with _report_lock():
-                _report_jobs[key] = {"status": "failed",
+                _report_jobs[key] = {"status": "bot_fetching",
                                      "error": err or "sahi gaana nahi mila",
                                      "stream_url": ""}
             return
@@ -1286,8 +1350,9 @@ def _report_worker(title, artist, key):
 @app.route("/api/report_status", methods=["GET"])
 def report_status():
     """v2.6.2: report job ka status. App har 15s poll karta hai.
-    -> {"ok": true, "status": "processing"|"done"|"failed",
+    -> {"ok": true, "status": "processing"|"done"|"failed"|"bot_fetching",
         "stream_url": ..., "error": ...}
+    "bot_fetching" (v2.6.4): Render par fail hua, ab bot (VM) try kar raha hai.
     """
     key = (request.args.get("key") or "").strip().lower()
     if not key:

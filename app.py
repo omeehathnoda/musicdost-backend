@@ -25,7 +25,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-18.6-playlist-resolve"
+BACKEND_VERSION = "2026-10-19.1-report-async"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -144,6 +144,20 @@ def _refresh_tg_cache():
         _tg_cache = _load_json_file(TG_CACHE_FILE, {})
         _tg_cache_time = now
 _tg_cache = None
+
+# v2.6.2: async report jobs — /api/report turant return karta hai, asli
+# kaam (download + channel upload) background thread me hota hai.
+# key -> {"status": "processing"|"done"|"failed", "stream_url": ..., "error": ...}
+_report_jobs = {}
+_report_jobs_lock = None  # lazy threading.Lock
+
+
+def _report_lock():
+    global _report_jobs_lock
+    if _report_jobs_lock is None:
+        import threading
+        _report_jobs_lock = threading.Lock()
+    return _report_jobs_lock
 
 def tg_cache_lookup(title, artist):
     """Telegram channel me file_id dhoondo. Returns file_id or None."""
@@ -864,11 +878,15 @@ def report():
     """Wrong-song report (Om ka order 2026-10-17): Now Playing me report
     button -> {"reason": "wrong_song", "title": ..., "artist": ...}.
 
-    Flow: poisoned Telegram-cache entry evict karo -> fresh VERIFIED
-    download (Telegram cache SKIP — wahi galat hai; JioSaavn-first,
+    v2.6.2: ASYNC — turant {"ok": true, "status": "processing"} return karta
+    hai. Asli kaam (fresh verified download + channel replace upload)
+    background thread me hota hai. App /api/report_status?key=... poll
+    karke completion dekhta hai. Isse app ki screen kabhi block nahi hoti.
+
+    Flow (background): poisoned Telegram-cache entry evict karo -> fresh
+    VERIFIED download (Telegram cache SKIP — wahi galat hai; JioSaavn-first,
     title+artist match, 2.5s duration rule — Om ke universal rules) ->
     sahi file channel me sendAudio (replace) -> runtime cache update.
-    App ko turant bajane ke liye stream_url wapas milta hai.
     """
     data = request.get_json(silent=True) or {}
     reason = (data.get("reason") or "").strip()
@@ -878,55 +896,108 @@ def report():
         return jsonify({"ok": False, "error": "reason/title chahiye"}), 400
     key = (title + "|" + artist).lower()
 
-    # 1. Evict poisoned entries (runtime cache + disk cache + local mp3)
-    global _tg_cache
-    try:
-        if _tg_cache is not None:
-            _tg_cache.pop(key, None)
-    except Exception:
-        pass
-    try:
-        d = _load_json_file(TG_CACHE_FILE, {})
-        if key in d:
-            del d[key]
-            with open(TG_CACHE_FILE, "w") as f:
-                json.dump(d, f)
-    except Exception:
-        pass
-    try:
-        lp = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
-        if os.path.exists(lp):
-            os.remove(lp)
-    except Exception:
-        pass
+    # Pehle se chal raha ho to dobara start mat karo.
+    with _report_lock():
+        existing = _report_jobs.get(key)
+        if existing and existing.get("status") == "processing":
+            return jsonify({"ok": True, "status": "processing",
+                            "key": key})
+        _report_jobs[key] = {"status": "processing", "stream_url": "",
+                             "error": ""}
 
-    # 2. Fresh VERIFIED download (Telegram cache skip)
-    path, err = _fresh_verified_media(title, artist)
-    if not path:
-        return jsonify({"ok": False,
-                        "error": err or "sahi gaana nahi mila"}), 404
+    import threading
+    t = threading.Thread(target=_report_worker, args=(title, artist, key),
+                         daemon=True, name=f"report-{safe_key(key)[:16]}")
+    t.start()
+    return jsonify({"ok": True, "status": "processing", "key": key})
 
-    # 3. Channel me replace (sahi file upload)
-    fid, mid = _channel_replace_upload(path, title, artist)
 
-    # 4. Runtime cache update (agla /api/stream turant sahi file dega)
-    if fid:
+def _report_worker(title, artist, key):
+    """Background me report process karo: evict -> fresh download ->
+    channel upload -> cache update. Status _report_jobs me update hota hai.
+    """
+    try:
+        # 1. Evict poisoned entries (runtime cache + disk cache + local mp3)
+        global _tg_cache
         try:
-            if _tg_cache is None:
-                _tg_cache = {}
-            _tg_cache[key] = fid
+            if _tg_cache is not None:
+                _tg_cache.pop(key, None)
+        except Exception:
+            pass
+        try:
             d = _load_json_file(TG_CACHE_FILE, {})
-            d[key] = fid
-            with open(TG_CACHE_FILE, "w") as f:
-                json.dump(d, f)
+            if key in d:
+                del d[key]
+                with open(TG_CACHE_FILE, "w") as f:
+                    json.dump(d, f)
+        except Exception:
+            pass
+        try:
+            lp = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
+            if os.path.exists(lp):
+                os.remove(lp)
         except Exception:
             pass
 
-    import urllib.parse
-    stream_url = ("/api/stream?title=" + urllib.parse.quote(title) +
-                  "&artist=" + urllib.parse.quote(artist))
-    return jsonify({"ok": True, "key": key, "file_id": fid or "",
-                    "message_id": mid or 0, "stream_url": stream_url})
+        # 2. Fresh VERIFIED download (Telegram cache skip)
+        path, err = _fresh_verified_media(title, artist)
+        if not path:
+            with _report_lock():
+                _report_jobs[key] = {"status": "failed",
+                                     "error": err or "sahi gaana nahi mila",
+                                     "stream_url": ""}
+            return
+
+        # 3. Channel me replace (sahi file upload)
+        fid, mid = _channel_replace_upload(path, title, artist)
+
+        # 4. Runtime cache update (agla /api/stream turant sahi file dega)
+        if fid:
+            try:
+                if _tg_cache is None:
+                    _tg_cache = {}
+                _tg_cache[key] = fid
+                d = _load_json_file(TG_CACHE_FILE, {})
+                d[key] = fid
+                with open(TG_CACHE_FILE, "w") as f:
+                    json.dump(d, f)
+            except Exception:
+                pass
+
+        import urllib.parse
+        stream_url = ("/api/stream?title=" + urllib.parse.quote(title) +
+                      "&artist=" + urllib.parse.quote(artist))
+        with _report_lock():
+            _report_jobs[key] = {"status": "done", "stream_url": stream_url,
+                                 "file_id": fid or "", "message_id": mid or 0,
+                                 "error": ""}
+    except Exception as e:
+        with _report_lock():
+            _report_jobs[key] = {"status": "failed",
+                                 "error": str(e)[:200], "stream_url": ""}
+
+
+@app.route("/api/report_status", methods=["GET"])
+def report_status():
+    """v2.6.2: report job ka status. App har 15s poll karta hai.
+    -> {"ok": true, "status": "processing"|"done"|"failed",
+        "stream_url": ..., "error": ...}
+    """
+    key = (request.args.get("key") or "").strip().lower()
+    if not key:
+        return jsonify({"ok": False, "error": "key chahiye"}), 400
+    with _report_lock():
+        job = _report_jobs.get(key)
+    if not job:
+        return jsonify({"ok": False, "error": "koi report nahi mili"}), 404
+    out = {"ok": True, "status": job.get("status", "processing"),
+           "stream_url": job.get("stream_url", ""),
+           "error": job.get("error", "")}
+    # Purane completed jobs saaf karo taaki memory na bhare.
+    if out["status"] in ("done", "failed"):
+        with _report_lock():
+            _report_jobs.pop(key, None)
+    return jsonify(out)
 
 
 @app.route("/api/playlist_resolve", methods=["GET", "POST"])
@@ -1011,6 +1082,24 @@ def _report_strict_match(title, artist, hit):
     return True
 
 
+def _report_yt_artist_ok(title, artist, pick):
+    """v2.6.2: YouTube pick ka strict artist check.
+
+    pick ke title ya uploader me artist ke significant words hone chahiye.
+    yt_best_pick sirf rerank karta hai (koi result kabhi khaali nahi hota),
+    isliye yahan hard reject lagta hai — galat artist ka version kabhi
+    aage na badhe.
+    """
+    aw = _report_words(artist)
+    if not aw:
+        return True
+    pt = (pick.get("title") or "").lower()
+    ul = (pick.get("uploader") or "").lower()
+    combined = pt + " " + ul
+    # Kam se kam ek significant artist word title/uploader me hona chahiye.
+    return any(w in combined for w in aw)
+
+
 def _report_expected_duration(title, artist):
     """iTunes se official duration (2.5s rule ke liye expected)."""
     try:
@@ -1077,13 +1166,22 @@ def _fresh_verified_media(title, artist):
                       f"{title} {artist} official"):
                 pick = None
                 try:
-                    pick = dl_engine.yt_best_pick(q)
+                    # v2.6.2: artist pass karo taaki yt_best_pick sahi
+                    # artist wale results ko upar rank kare (Om 2026-10-19:
+                    # dobara galat gaana aaya tha — YouTube path par artist
+                    # check lagta hi nahi tha).
+                    pick = dl_engine.yt_best_pick(q, artist=artist)
                 except Exception:
                     continue
                 if not pick or pick.get("duration_secs", 0) > 2700:
                     continue
                 pt = (pick.get("title") or "").lower()
                 if any(j in pt for j in _REPORT_JUNK):
+                    continue
+                # v2.6.2: strict artist verify — title ya uploader me
+                # artist ka naam hona chahiye, warna galat artist ka
+                # version hai.
+                if not _report_yt_artist_ok(title, artist, pick):
                     continue
                 psecs = pick.get("duration_secs") or 0
                 if exp and abs(psecs - exp) > 2.5:

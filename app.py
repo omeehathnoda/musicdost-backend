@@ -9,6 +9,13 @@ Env vars:
   HOST        - default 0.0.0.0
   MEDIA_DIR   - where MP3s are cached (ephemeral on Render free tier)
   SECRET_KEY  - Flask session secret
+
+Om ka standing architecture principle (2026-10-19):
+  *** Telegram channel PRIMARY source hai — use perfect banana hai. ***
+  JioSaavn/YouTube SIRF fetchers hain (Telegram ko populate karne ke liye),
+  primary playback source NAHI. Har gaana jo kabhi bajta hai wo background me
+  channel me cache hota hai; channel ka har entry CORRECT hona chahiye.
+  Playback hamesha pehle Telegram se, fallback hi Saavn/YT.
 """
 import hashlib
 import json
@@ -25,7 +32,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-19.1-report-async"
+BACKEND_VERSION = "2026-10-19.2-channel-source"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -160,14 +167,21 @@ def _report_lock():
     return _report_jobs_lock
 
 def tg_cache_lookup(title, artist):
-    """Telegram channel me file_id dhoondo. Returns file_id or None."""
+    """Telegram channel me file_id dhoondo. Returns file_id or None.
+
+    PRIMARY SOURCE (Om 2026-10-19): playback hamesha pehle yahan se —
+    JioSaavn/YouTube sirf fallback fetchers hain."""
     global _tg_cache
     _refresh_tg_cache()
     if _tg_cache is None:
         _tg_cache = _load_json_file(TG_CACHE_FILE, {})
     key = (title + "|" + artist).lower()
     if key in _tg_cache:
-        return _tg_cache[key]
+        v = _tg_cache[key]
+        # v2.6.3: naya format {"file_id","message_id"} ho sakta hai
+        if isinstance(v, dict):
+            return v.get("file_id")
+        return v
     # Smart match: title similar ho to bhi chalega
     import re
     def norm(s):
@@ -176,6 +190,9 @@ def tg_cache_lookup(title, artist):
     for k, fid in _tg_cache.items():
         kt, ka = k.split("|", 1) if "|" in k else (k, "")
         if norm(kt) == nt and (not na or na in norm(ka) or norm(ka) in na):
+            # v2.6.3: dict format ho to file_id nikalo
+            if isinstance(fid, dict):
+                return fid.get("file_id")
             return fid
     return None
 
@@ -213,12 +230,267 @@ def tg_download_file(file_id, dest_path):
         return False
 
 
+# ---------------- Telegram = PRIMARY source (Om 2026-10-19) ----------------
+# Principle: channel ko perfect banana hai. JioSaavn/YouTube sirf fetchers
+# hain — jo gaana channel me nahi hai wo jab bhi bajta hai, background me
+# channel me upload hokar bind ho jata hai. Agli baar se instant playback.
+TG_CACHE_CHANNEL = "-1003960695955"
+
+
+def _tg_cache_entry(key):
+    """Cache entry se (file_id, message_id) nikalo.
+
+    Naya format: {"file_id": ..., "message_id": ...}; purana format sirf
+    file_id string tha (backward compatible — message_id None milega).
+    """
+    global _tg_cache
+    _refresh_tg_cache()
+    if _tg_cache is None:
+        _tg_cache = _load_json_file(TG_CACHE_FILE, {})
+    v = _tg_cache.get(key)
+    if isinstance(v, dict):
+        return v.get("file_id"), v.get("message_id")
+    if isinstance(v, str) and v:
+        return v, None
+    return None, None
+
+
+def _tg_cache_bind(key, file_id, message_id=None):
+    """file_id (+message_id) ko runtime + disk cache me bind karo."""
+    if not file_id:
+        return
+    global _tg_cache
+    try:
+        if _tg_cache is None:
+            _tg_cache = {}
+        _tg_cache[key] = {"file_id": file_id, "message_id": message_id}
+        d = _load_json_file(TG_CACHE_FILE, {})
+        d[key] = {"file_id": file_id, "message_id": message_id}
+        with open(TG_CACHE_FILE, "w") as f:
+            json.dump(d, f)
+    except Exception:
+        pass
+
+
+def _channel_delete_message(message_id):
+    """Best effort: channel se purana message delete karo.
+
+    Bot purane migration messages delete NAHI kar sakta (HTTP 400) — sirf
+    apne recent uploads. Fail ho to silently ignore (report flow isko
+    best-effort manta hai).
+    """
+    if not message_id or not TG_BOT_TOKEN:
+        return False
+    try:
+        data = json.dumps({"chat_id": TG_CACHE_CHANNEL,
+                           "message_id": message_id}).encode()
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{TG_BOT_TOKEN}/deleteMessage",
+            data=data, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            resp = json.load(r)
+        return bool((resp or {}).get("ok"))
+    except Exception:
+        return False
+
+
+_lazy_inflight = set()
+_lazy_lock = None
+
+
+def _lazy_lock_get():
+    global _lazy_lock
+    if _lazy_lock is None:
+        import threading
+        _lazy_lock = threading.Lock()
+    return _lazy_lock
+
+
+def _lazy_channel_cache_async(title, artist):
+    """Gaana channel me nahi tha aur Saavn/YT se aaya — background me
+    channel me daal do (PRIMARY source principle). User wait nahi karta;
+    agli baar se gaana channel se instant bajega.
+    Worker _fresh_verified_media ka STRICT pipeline use karta hai."""
+    if not title or not TG_BOT_TOKEN:
+        return
+    key = (title + "|" + artist).lower()
+    with _lazy_lock_get():
+        if key in _lazy_inflight:
+            return
+        _lazy_inflight.add(key)
+    import threading
+    t = threading.Thread(target=_lazy_channel_cache_worker,
+                         args=(title, artist, key),
+                         daemon=True, name=f"lazycache-{safe_key(key)[:16]}")
+    t.start()
+
+
+def _lazy_channel_cache_worker(title, artist, key):
+    """STRICT verified fetch -> channel upload.
+
+    Om ka rule (2026-10-19): galat gaana (wrong artist / alag duration)
+    KABHI channel par nahi jana chahiye. Isliye loose ensure_media wali
+    file upload nahi karte — _fresh_verified_media ka strict pipeline
+    (title saare words + artist partial match + 2.5s duration + junk skip)
+    se verified file lao, tabhi upload karo. Strict na mile to channel me
+    kuch mat daalo (agli baar phir try hoga).
+    """
+    try:
+        # Beech me kisi aur thread ne bind kar diya ho to skip.
+        fid, _ = _tg_cache_entry(key)
+        if fid:
+            return
+        vpath, err = _fresh_verified_media(title, artist)
+        if not vpath or not os.path.exists(vpath):
+            return
+        if os.path.getsize(vpath) < 50 * 1024:
+            return
+        fid, mid = _channel_replace_upload(vpath, title, artist)
+        if fid:
+            _tg_cache_bind(key, fid, mid)
+    except Exception:
+        pass
+    finally:
+        with _lazy_lock_get():
+            _lazy_inflight.discard(key)
+
+
+def _stream_fetch(title, artist, ytid=None, for_download=False):
+    """ensure_media + lazy Telegram caching.
+
+    Pehle dekho gaana channel me hai ya nahi; nahi hai aur Saavn/YT se
+    aaya to background me channel me daal do. ytid key-space alag hai —
+    us par lazy caching skip (title|artist mapping nahi hai).
+
+    PRIORITY (Om 2026-10-19): play/stream aur DOWNLOAD dono isi fast-track
+    se jaate hain — turant background upload, slow queue (30-60s) ka wait
+    nahi. Download par user wait kar raha hai, isliye uska channel upload
+    sabse pehle. Agar upload fail ho to agli baar bajne/download par phir
+    try hoga (self-healing — tab tak channel me nahi hoga).
+    """
+    was_cached = None
+    if not ytid:
+        try:
+            was_cached, _ = _tg_cache_entry((title + "|" + artist).lower())
+        except Exception:
+            was_cached = None
+    path, err = ensure_media(title, artist, ytid=ytid,
+                             for_download=for_download)
+    if path and not ytid and not was_cached:
+        try:
+            _lazy_channel_cache_async(title, artist)
+        except Exception:
+            pass
+    return path, err
+
+
+# v2.6.3: CENTRAL background cache queue — Om ke final caching rules
+# (2026-10-19):
+#   ✅ Playlist add ho (user ki ya curated) -> saare gaane queue me (yahi
+#      feed karta hai — playlist_resolve se)
+#   ✅ Gaana bajta hai (play/stream) -> fast-track (_stream_fetch ->
+#      _lazy_channel_cache_async, turant upload, queue ka wait nahi)
+#   ✅ User DOWNLOAD karta hai -> turant priority se channel me (wahi
+#      fast-track; user wait kar raha hai, 30-60s queue me nahi)
+#   ✅ Report se sahi gaana -> channel me (report worker, already)
+#   ❌ Sirf search/browse me dikhna -> queue me NAHI (faltu gaane waste hain)
+# Ek single worker dheere dheere (har gaane ke beech 30-60s gap) queue ke
+# gaane channel me daalta hai: Telegram me hai? nahi to Saavn/YT se lao ->
+# sendAudio -> file_id bind.
+import collections as _collections
+_cache_queue = _collections.deque()
+_cache_queued = set()  # dedupe: queue me / process ho rahe keys
+_cache_lock = None
+_cache_worker_on = False
+
+
+def _cache_lock_get():
+    global _cache_lock
+    if _cache_lock is None:
+        import threading
+        _cache_lock = threading.Lock()
+    return _cache_lock
+
+
+def _cache_enqueue(tracks):
+    """[{title, artist}...] ko background queue me daalo (dedupe).
+    Worker pehli enqueue par start hota hai, uske baad hamesha chalta hai."""
+    if not tracks or not TG_BOT_TOKEN:
+        return
+    global _cache_worker_on
+    with _cache_lock_get():
+        for tr in tracks:
+            try:
+                title = (tr.get("title") or "").strip()
+                artist = (tr.get("artist") or "").strip()
+            except AttributeError:
+                continue
+            if not title:
+                continue
+            key = (title + "|" + artist).lower()
+            if key in _cache_queued:
+                continue
+            _cache_queued.add(key)
+            _cache_queue.append((title, artist))
+        if not _cache_worker_on:
+            _cache_worker_on = True
+            import threading
+            t = threading.Thread(target=_cache_worker_loop, daemon=True,
+                                 name="channel-cache-queue")
+            t.start()
+
+
+def _cache_worker_loop():
+    """Single worker: queue se ek-ek gaana nikalo -> channel me hai to
+    skip, nahi to Saavn/YT se fetch -> channel me sendAudio -> bind.
+    Har gaane ke beech 30-60s ka gap (rate limit / overload se bachne)."""
+    import random
+    import time
+    while True:
+        tr = None
+        with _cache_lock_get():
+            if _cache_queue:
+                tr = _cache_queue.popleft()
+        if tr is None:
+            time.sleep(10)
+            continue
+        title, artist = tr
+        try:
+            key = (title + "|" + artist).lower()
+            fid, _ = _tg_cache_entry(key)
+            if not fid:
+                # STRICT pipeline (Om 2026-10-19): title + artist partial
+                # match + 2.5s duration — galat gaana channel par kabhi nahi.
+                vpath, verr = _fresh_verified_media(title, artist)
+                if vpath and os.path.exists(vpath):
+                    nfid, nmid = _channel_replace_upload(vpath, title,
+                                                         artist)
+                    if nfid:
+                        _tg_cache_bind(key, nfid, nmid)
+        except Exception:
+            pass
+        finally:
+            with _cache_lock_get():
+                _cache_queued.discard((title + "|" + artist).lower())
+        try:
+            time.sleep(random.uniform(30, 60))
+        except Exception:
+            pass
+
+
 def ensure_media(title, artist, ytid=None, for_download=False):
     """MP3 lao. Returns (path, err).
     for_download=True: ID3 me title/artist likho taaki downloaded file
     doosre music players me bhi sahi naam/artist dikhaye (Om ka order
     2026-10-18 — 'ye kahne ki baat nahi h'). Stream par tag nahi likhte
-    (fast path bana rahe)."""
+    (fast path bana rahe).
+
+    ARCHITECTURE (Om 2026-10-19): Telegram channel PRIMARY source hai.
+    Neeche ka order isi principle par hai — pehle Telegram, uske baad hi
+    fetchers (JioSaavn, YouTube). JioSaavn/YouTube se aaya gaana _stream_fetch
+    background me channel me daal deta hai taaki agli baar seedha channel
+    se baje.
+    """
     key = (title + "|" + artist).lower()
     if ytid:
         key = "yt:" + ytid
@@ -854,7 +1126,7 @@ def stream():
     ytid = (request.args.get("ytid") or "").strip() or None
     if not title:
         return jsonify({"error": "title chahiye"}), 400
-    path, err = ensure_media(title, artist, ytid=ytid)
+    path, err = _stream_fetch(title, artist, ytid=ytid)
     if not path:
         return jsonify({"error": err}), 404
     return send_range(path)
@@ -867,7 +1139,7 @@ def download():
     ytid = (request.args.get("ytid") or "").strip() or None
     if not title:
         return jsonify({"error": "title chahiye"}), 400
-    path, err = ensure_media(title, artist, ytid=ytid, for_download=True)
+    path, err = _stream_fetch(title, artist, ytid=ytid, for_download=True)
     if not path:
         return jsonify({"error": err}), 404
     return send_range(path, download_name=f"{title} - {artist}")
@@ -917,7 +1189,14 @@ def _report_worker(title, artist, key):
     channel upload -> cache update. Status _report_jobs me update hota hai.
     """
     try:
-        # 1. Evict poisoned entries (runtime cache + disk cache + local mp3)
+        # 1. Evict poisoned entries (runtime cache + disk cache + local mp3).
+        # Pehle purane message_id ko pakad lo taaki naya upload hone ke baad
+        # galat wale message ko channel se delete kar sakein (best effort).
+        old_mid = None
+        try:
+            _, old_mid = _tg_cache_entry(key)
+        except Exception:
+            old_mid = None
         global _tg_cache
         try:
             if _tg_cache is not None:
@@ -951,16 +1230,21 @@ def _report_worker(title, artist, key):
         # 3. Channel me replace (sahi file upload)
         fid, mid = _channel_replace_upload(path, title, artist)
 
-        # 4. Runtime cache update (agla /api/stream turant sahi file dega)
+        # 3b. Purana GALAT message delete karo (best effort). Bot purane
+        # migration messages delete nahi kar sakta (HTTP 400) — recent
+        # uploads delete ho jayenge, baaki ignore.
+        if fid and old_mid:
+            try:
+                _channel_delete_message(old_mid)
+            except Exception:
+                pass
+
+        # 4. Runtime cache update (agla /api/stream turant sahi file dega).
+        # Naya format: {file_id, message_id} taaki agli report par delete
+        # ho sake.
         if fid:
             try:
-                if _tg_cache is None:
-                    _tg_cache = {}
-                _tg_cache[key] = fid
-                d = _load_json_file(TG_CACHE_FILE, {})
-                d[key] = fid
-                with open(TG_CACHE_FILE, "w") as f:
-                    json.dump(d, f)
+                _tg_cache_bind(key, fid, mid)
             except Exception:
                 pass
 
@@ -1048,6 +1332,13 @@ def playlist_resolve():
                     image = im.group(1)
     except Exception:
         pass
+    # v2.6.3: playlist ke saare gaane background cache queue me — dheere
+    # dheere poori playlist Telegram par aa jayegi (PRIMARY source).
+    # Search results yahan NAHI aate (Om: faltu gaane waste hain).
+    try:
+        _cache_enqueue(tracks)
+    except Exception:
+        pass
     return jsonify({"ok": True, "name": label or "Playlist",
                     "image": image, "tracks": tracks})
 
@@ -1131,9 +1422,15 @@ def _report_expected_duration(title, artist):
 
 
 def _fresh_verified_media(title, artist):
-    """Telegram cache SKIP karke fresh verified MP3 lao.
-    Returns (path, err). Om ke universal rules: title+artist match,
-    2.5s duration rule.
+    """STRICT verified MP3 lao — SHARED fetcher (report flow + background
+    channel caching dono isi ko use karte hain).
+
+    Telegram cache SKIP karke fresh download. Returns (path, err).
+    Om ke universal rules (2026-10-15) + song-matching rule (2026-10-19):
+      1. Duration: expected (iTunes) se ±2.5s ke andar hona chahiye
+      2. Artist: kam se kam partial match (koi significant word)
+      3. Title: saare words match + junk (cover/remix/karaoke/...) auto-skip
+    Galat gaana mile to (None, err) — channel par kuch nahi jata.
     """
     import tempfile
     import shutil
@@ -1234,7 +1531,7 @@ def _channel_replace_upload(path, title, artist):
         import uuid
         boundary = uuid.uuid4().hex
         fields = {
-            "chat_id": "-1003960695955",
+            "chat_id": TG_CACHE_CHANNEL,
             "title": title[:100],
             "performer": artist[:100],
         }
@@ -1274,7 +1571,7 @@ def prepare():
     ytid = (request.args.get("ytid") or "").strip() or None
     if not title:
         return jsonify({"error": "title chahiye"}), 400
-    path, err = ensure_media(title, artist, ytid=ytid)
+    path, err = _stream_fetch(title, artist, ytid=ytid)
     if not path:
         return jsonify({"error": err or "taiyaar nahi hua"}), 404
     return jsonify({"ok": True})

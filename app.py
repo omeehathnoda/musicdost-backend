@@ -575,13 +575,7 @@ def ensure_media(title, artist, ytid=None, for_download=False):
     if ytid:
         key = "yt:" + ytid
     path = os.path.join(MEDIA_DIR, safe_key(key) + ".mp3")
-    if os.path.exists(path) and os.path.getsize(path) > 50 * 1024:
-        if for_download:
-            try:
-                dl_engine.tag_audio_file(path, title, artist)
-            except Exception:
-                pass
-        return path, None
+    fid_path = path + ".fid"  # sidecar: local file kis Telegram file_id ki hai
     # Har request ke liye alag tmpdir (concurrent downloads na takraye)
     import tempfile
     tmpdir = tempfile.mkdtemp(prefix="dl_", dir=MEDIA_DIR)
@@ -607,7 +601,54 @@ def ensure_media(title, artist, ytid=None, for_download=False):
             pass
         return None, "not_found"
 
-    # 1. JioSaavn (agar throttle nahi hai)
+    # 1. Telegram channel — PRIMARY SOURCE (Om 2026-10-19).
+    #    Channel me jo file hai WAHI bajegi. Local disk ki file sirf tab
+    #    use hogi jab uska file_id channel wale se match kare (.fid sidecar).
+    #    Isse stale/galat local file kabhi serve nahi hogi.
+    #    (Fix 2026-10-19: pehle local/JioSaavn check hote the — galat 90s
+    #    file baj rahi thi jabki channel me sahi 4:53 version tha.)
+    try:
+        fid = tg_cache_lookup(title, artist)
+        if fid:
+            local_ok = False
+            if os.path.exists(path) and os.path.getsize(path) > 50 * 1024:
+                try:
+                    with open(fid_path) as f:
+                        if f.read().strip() == fid:
+                            local_ok = True
+                except Exception:
+                    pass
+            downloaded = local_ok
+            if not local_ok:
+                if tg_download_file(fid, path):
+                    try:
+                        with open(fid_path, "w") as f:
+                            f.write(fid)
+                    except Exception:
+                        pass
+                    downloaded = True
+            if downloaded and os.path.exists(path) and \
+                    os.path.getsize(path) > 50 * 1024:
+                if for_download:
+                    try:
+                        dl_engine.tag_audio_file(path, title, artist)
+                    except Exception:
+                        pass
+                return path, None
+    except Exception:
+        pass
+
+    # 2. Local disk — sirf jab gaana Telegram channel me NAHI hai
+    #    (purana fetcher-downloaded file; channel wala path upar handle ho gaya)
+    if os.path.exists(path) and os.path.getsize(path) > 50 * 1024:
+        if for_download:
+            try:
+                dl_engine.tag_audio_file(path, title, artist)
+            except Exception:
+                pass
+        return path, None
+
+    # 3. JioSaavn (agar throttle nahi hai)
     jio_throttled = not dl_engine.jiosaavn_usable()
     if not jio_throttled:
         try:
@@ -633,20 +674,7 @@ def ensure_media(title, artist, ytid=None, for_download=False):
         except Exception:
             pass
 
-    # 2. Telegram cache (JioSaavn throttle ho ya fail ho jaye)
-    try:
-        fid = tg_cache_lookup(title, artist)
-        if fid and tg_download_file(fid, path):
-            if for_download:
-                try:
-                    dl_engine.tag_audio_file(path, title, artist)
-                except Exception:
-                    pass
-            return path, None
-    except Exception:
-        pass
-
-    # 3. YouTube fallback
+    # 4. YouTube fallback
     try:
         pick = dl_engine.yt_best_pick(f"{title} {artist} song")
         if not pick:

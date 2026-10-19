@@ -32,7 +32,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-19.2-channel-source"
+BACKEND_VERSION = "2026-10-19.3-cache-miss-refresh"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -121,13 +121,20 @@ TG_CACHE_FILE = os.path.join(BASE, "tg_cache.json")
 TG_CACHE_URL = "https://raw.githubusercontent.com/omeehathnoda/musicdost-backend/main/tg_cache.json"
 _tg_cache_time = 0
 
-def _refresh_tg_cache():
-    """GitHub se latest tg_cache.json lao (1 ghante me ek baar)."""
+def _refresh_tg_cache(force=False):
+    """GitHub se latest tg_cache.json lao (1 ghante me ek baar; force=True par turant).
+
+    Om 2026-10-19: cache-miss par force=True — koi gaana manually GitHub
+    cache me add ho (report fix waghera) to app ko 1 ghante ka wait na karna pade.
+    """
     global _tg_cache, _tg_cache_time
     import time
     now = time.time()
     if _tg_cache is not None and now - _tg_cache_time < 3600:
-        return
+        if not force or now - _tg_cache_time < 60:
+            # force=True par bhi 60s ka cooldown — genuinely missing gaane
+            # har request par GitHub ko hammer na karein
+            return
     try:
         import urllib.request, json
         req = urllib.request.Request(TG_CACHE_URL,
@@ -170,7 +177,11 @@ def tg_cache_lookup(title, artist):
     """Telegram channel me file_id dhoondo. Returns file_id or None.
 
     PRIMARY SOURCE (Om 2026-10-19): playback hamesha pehle yahan se —
-    JioSaavn/YouTube sirf fallback fetchers hain."""
+    JioSaavn/YouTube sirf fallback fetchers hain.
+
+    Cache-miss par GitHub se force-refresh (Om 2026-10-19): manually add
+    kiya gaya gaana turant mil jaye, hourly sync ka wait na ho.
+    """
     global _tg_cache
     _refresh_tg_cache()
     if _tg_cache is None:
@@ -179,6 +190,13 @@ def tg_cache_lookup(title, artist):
     if key in _tg_cache:
         v = _tg_cache[key]
         # v2.6.3: naya format {"file_id","message_id"} ho sakta hai
+        if isinstance(v, dict):
+            return v.get("file_id")
+        return v
+    # Cache-miss: GitHub se turant fresh lao aur dobara dekho
+    _refresh_tg_cache(force=True)
+    if _tg_cache and key in _tg_cache:
+        v = _tg_cache[key]
         if isinstance(v, dict):
             return v.get("file_id")
         return v
@@ -248,6 +266,10 @@ def _tg_cache_entry(key):
     if _tg_cache is None:
         _tg_cache = _load_json_file(TG_CACHE_FILE, {})
     v = _tg_cache.get(key)
+    if v is None:
+        # Cache-miss: GitHub se turant fresh lao (Om 2026-10-19)
+        _refresh_tg_cache(force=True)
+        v = _tg_cache.get(key) if _tg_cache else None
     if isinstance(v, dict):
         return v.get("file_id"), v.get("message_id")
     if isinstance(v, str) and v:

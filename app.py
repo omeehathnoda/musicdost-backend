@@ -32,7 +32,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-19.5-telegram-first"
+BACKEND_VERSION = "2026-10-20.1-bulk-cache"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -212,6 +212,14 @@ _tg_cache = None
 _report_jobs = {}
 _report_jobs_lock = None  # lazy threading.Lock
 
+# v2.6.5: bulk cache jobs — /api/bulk_cache turant job_id deta hai, background
+# thread gaane ek-ek karke channel me daalta hai. App /api/bulk_cache_status
+# poll karke progress dekhta hai.
+# job_id -> {"status": "running"|"done", "total": N, "done": n,
+#            "failed": [{title, artist, reason}]}
+_bulk_jobs = {}
+_bulk_jobs_lock = None  # lazy threading.Lock
+
 
 def _report_lock():
     global _report_jobs_lock
@@ -219,6 +227,14 @@ def _report_lock():
         import threading
         _report_jobs_lock = threading.Lock()
     return _report_jobs_lock
+
+
+def _bulk_lock_get():
+    global _bulk_jobs_lock
+    if _bulk_jobs_lock is None:
+        import threading
+        _bulk_jobs_lock = threading.Lock()
+    return _bulk_jobs_lock
 
 def tg_cache_lookup(title, artist):
     """Telegram channel me file_id dhoondo. Returns file_id or None.
@@ -1397,6 +1413,150 @@ def report_status():
         with _report_lock():
             _report_jobs.pop(key, None)
     return jsonify(out)
+
+
+@app.route("/api/bulk_cache", methods=["POST"])
+def bulk_cache():
+    """v2.6.5: "Create Cache" (Om ka order 2026-10-20) — online playlist ke
+    gaane background me channel me daalo.
+
+    Body: {"songs": [{"title": ..., "artist": ...}, ...]}
+    -> {"ok": true, "job_id": "..."}
+
+    Background worker har gaane ke liye:
+      1. Channel me pehle se hai? -> done (skip)
+      2. ensure_media(title, artist) -> path mila? -> done + channel upload
+         (JioSaavn/YouTube se aaya to _channel_replace_upload se channel me)
+      3. Fail -> failed list me (reason ke saath) + bot fallback queue
+
+    App /api/bulk_cache_status?job_id=... har 3s poll karta hai.
+    """
+    data = request.get_json(silent=True) or {}
+    songs = data.get("songs") or []
+    clean = []
+    seen = set()
+    for s in songs:
+        try:
+            title = (s.get("title") or "").strip()
+            artist = (s.get("artist") or "").strip()
+        except AttributeError:
+            continue
+        if not title:
+            continue
+        key = (title + "|" + artist).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        clean.append({"title": title, "artist": artist})
+    if not clean:
+        return jsonify({"ok": False, "error": "songs chahiye"}), 400
+    import uuid
+    job_id = uuid.uuid4().hex[:16]
+    with _bulk_lock_get():
+        _bulk_jobs[job_id] = {"status": "running", "total": len(clean),
+                              "done": 0, "failed": [], "songs": clean}
+    import threading
+    t = threading.Thread(target=_bulk_cache_worker, args=(job_id,),
+                         daemon=True, name=f"bulkcache-{job_id[:8]}")
+    t.start()
+    return jsonify({"ok": True, "job_id": job_id, "total": len(clean)})
+
+
+@app.route("/api/bulk_cache_status", methods=["GET"])
+def bulk_cache_status():
+    """v2.6.5: bulk cache job ka progress.
+    -> {"ok": true, "status": "running"|"done", "total": N, "done": n,
+        "failed": [{title, artist, reason}]}
+    """
+    job_id = (request.args.get("job_id") or "").strip()
+    if not job_id:
+        return jsonify({"ok": False, "error": "job_id chahiye"}), 400
+    with _bulk_lock_get():
+        job = _bulk_jobs.get(job_id)
+        if not job:
+            return jsonify({"ok": False,
+                            "error": "koi job nahi mili"}), 404
+        out = {"ok": True, "status": job["status"], "total": job["total"],
+               "done": job["done"],
+               "failed": list(job["failed"])}
+        # Complete hone ke baad thodi der rakho taaki app final state
+        # padh sake, phir saaf karo.
+        if out["status"] == "done":
+            _bulk_jobs.pop(job_id, None)
+    return jsonify(out)
+
+
+def _bulk_cache_worker(job_id):
+    """Background me gaane channel me daalo, progress _bulk_jobs me.
+
+    Har gaana: channel check -> ensure_media -> (fetcher se aaya to)
+    channel upload -> done/failed. Ek gaane me fail ho to aage badho,
+    poora job kabhi nahi rukta.
+    """
+    with _bulk_lock_get():
+        job = _bulk_jobs.get(job_id)
+        if not job:
+            return
+        songs = list(job["songs"])
+    for s in songs:
+        title = s["title"]
+        artist = s["artist"]
+        key = (title + "|" + artist).lower()
+        try:
+            # 1. Channel me pehle se hai? -> done.
+            fid, _ = _tg_cache_entry(key)
+            if fid:
+                _bulk_mark_done(job_id)
+                continue
+            # 2. Fetch karo (Telegram-first ensure_media).
+            path, err = ensure_media(title, artist)
+            if path and os.path.exists(path):
+                # Fetcher (JioSaavn/YouTube) se aaya aur channel me nahi
+                # tha -> channel me upload karo taaki agli baar seedha
+                # channel se baje (PRIMARY source principle).
+                try:
+                    nfid, nmid = _channel_replace_upload(path, title,
+                                                         artist)
+                    if nfid:
+                        _tg_cache_bind(key, nfid, nmid)
+                except Exception:
+                    pass
+                _bulk_mark_done(job_id)
+            else:
+                # 3. Fail -> bot fallback queue (VM wala bot try karega),
+                # reason ke saath failed list me.
+                try:
+                    _queue_bot_fallback(title, artist, key)
+                except Exception:
+                    pass
+                _bulk_mark_failed(job_id, title, artist,
+                                  err or "not_found")
+        except Exception as e:
+            try:
+                _bulk_mark_failed(job_id, title, artist, "error")
+            except Exception:
+                pass
+    with _bulk_lock_get():
+        job = _bulk_jobs.get(job_id)
+        if job:
+            job["status"] = "done"
+
+
+def _bulk_mark_done(job_id):
+    with _bulk_lock_get():
+        job = _bulk_jobs.get(job_id)
+        if job:
+            job["done"] += 1
+
+
+def _bulk_mark_failed(job_id, title, artist, reason):
+    # "done" sirf successfully-cached gaane ginta hai; failed entries apni
+    # list me hain. Progress = done + len(failed).
+    with _bulk_lock_get():
+        job = _bulk_jobs.get(job_id)
+        if job:
+            job["failed"].append({"title": title, "artist": artist,
+                                  "reason": reason})
 
 
 @app.route("/api/playlist_resolve", methods=["GET", "POST"])

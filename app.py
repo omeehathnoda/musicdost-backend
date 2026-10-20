@@ -32,7 +32,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-20.1-bulk-cache"
+BACKEND_VERSION = "2026-10-20.2-bulk-dedupe"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -1486,39 +1486,123 @@ def bulk_cache_status():
     return jsonify(out)
 
 
+def _push_tg_cache_github(new_binds):
+    """Bulk job ke naye binds ko GitHub tg_cache.json par persist karo.
+
+    Render ki disk ephemeral hai — sirf memory/disk bind karne se server
+    restart par binds kho jate the aur agla Create Cache click sab kuch
+    DOBARA upload kar deta tha (duplicates bug #2). Job ke end par poora
+    updated cache ek baar push karte hain. Token env (GITHUB_TOKEN /
+    GH_TOKEN) se milta hai — value kabhi log/print nahi hoti. Token na
+    mile ya push fail ho to sirf log; job fail nahi hota (memory+disk
+    binds to hain hi).
+    """
+    if not new_binds:
+        return
+    try:
+        import base64
+        # Full cache = disk file (binds wahan already hain) + is job ke
+        # binds jo kisi race me disk par na pahunche hon (safety merge).
+        d = _load_json_file(TG_CACHE_FILE, {})
+        if not isinstance(d, dict):
+            d = {}
+        for k, fid in new_binds.items():
+            cur = d.get(k)
+            if isinstance(cur, dict) and cur.get("file_id"):
+                continue
+            if isinstance(cur, str) and cur:
+                continue
+            d[k] = {"file_id": fid, "message_id": None}
+        try:
+            with open(TG_CACHE_FILE, "w") as f:
+                json.dump(d, f)
+        except Exception:
+            pass
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            print("[bulk_cache] GitHub push skipped: token env missing",
+                  flush=True)
+            return
+        api = ("https://api.github.com/repos/omeehathnoda/"
+               "musicdost-backend/contents/tg_cache.json")
+        headers = {"Authorization": "Bearer " + token,
+                   "Accept": "application/vnd.github+json",
+                   "User-Agent": "musicdost-backend"}
+        sha = None
+        try:
+            req = urllib.request.Request(api + "?ref=main",
+                                         headers=headers)
+            with urllib.request.urlopen(req, timeout=20) as r:
+                sha = json.loads(r.read()).get("sha")
+        except Exception:
+            sha = None
+        body = {"message": "bulk_cache: persist channel binds",
+                "content": base64.b64encode(
+                    json.dumps(d).encode()).decode(),
+                "branch": "main"}
+        if sha:
+            body["sha"] = sha
+        req = urllib.request.Request(api, data=json.dumps(body).encode(),
+                                     headers=headers, method="PUT")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=30) as r:
+            r.read()
+        print("[bulk_cache] tg_cache.json GitHub par push hua "
+              "(%d naye binds)" % len(new_binds), flush=True)
+    except Exception:
+        print("[bulk_cache] GitHub push fail — binds memory+disk me hain",
+              flush=True)
+
+
 def _bulk_cache_worker(job_id):
     """Background me gaane channel me daalo, progress _bulk_jobs me.
 
-    Har gaana: channel check -> ensure_media -> (fetcher se aaya to)
-    channel upload -> done/failed. Ek gaane me fail ho to aage badho,
-    poora job kabhi nahi rukta.
+    Har gaana: channel check (exact + smart-match) -> miss ho tabhi
+    fetch + channel upload -> done/failed. Ek gaane me fail ho to aage
+    badho, poora job kabhi nahi rukta. Job ke naye binds job-end par
+    GitHub par persist hote hain (_push_tg_cache_github).
     """
     with _bulk_lock_get():
         job = _bulk_jobs.get(job_id)
         if not job:
             return
         songs = list(job["songs"])
+    new_binds = {}
     for s in songs:
         title = s["title"]
         artist = s["artist"]
         key = (title + "|" + artist).lower()
         try:
-            # 1. Channel me pehle se hai? -> done.
-            fid, _ = _tg_cache_entry(key)
+            # 1. Channel me pehle se hai? -> done, KOI upload nahi.
+            # tg_cache_lookup = exact + smart-match — vahi function jo
+            # ensure_media use karta hai. Pehle step-1 _tg_cache_entry
+            # (exact-only) tha: artist format farak (',' vs '&') par
+            # miss -> ensure_media smart-match se channel se hi download
+            # karke de deta tha -> worker use DOBARA upload kar deta tha
+            # (duplicates bug #1).
+            fid = tg_cache_lookup(title, artist)
             if fid:
+                # Heal: exact key missing ho to bind kar do, taaki agli
+                # baar exact match bhi hit ho; bind job-end par GitHub
+                # par persist hoga.
+                cur, _ = _tg_cache_entry(key)
+                if not cur:
+                    _tg_cache_bind(key, fid)
+                    new_binds[key] = fid
                 _bulk_mark_done(job_id)
                 continue
-            # 2. Fetch karo (Telegram-first ensure_media).
+            # 2. Channel me nahi hai -> fetch karo. Lookup miss ke baad
+            # ensure_media Telegram se kuch la hi nahi sakta (vahi
+            # lookup fail hua), file fetcher (JioSaavn/YouTube) se hi
+            # aayegi -> channel upload sahi hai (PRIMARY principle).
             path, err = ensure_media(title, artist)
             if path and os.path.exists(path):
-                # Fetcher (JioSaavn/YouTube) se aaya aur channel me nahi
-                # tha -> channel me upload karo taaki agli baar seedha
-                # channel se baje (PRIMARY source principle).
                 try:
                     nfid, nmid = _channel_replace_upload(path, title,
                                                          artist)
                     if nfid:
                         _tg_cache_bind(key, nfid, nmid)
+                        new_binds[key] = nfid
                 except Exception:
                     pass
                 _bulk_mark_done(job_id)
@@ -1536,6 +1620,13 @@ def _bulk_cache_worker(job_id):
                 _bulk_mark_failed(job_id, title, artist, "error")
             except Exception:
                 pass
+    # Job-end: naye binds GitHub par persist karo (Render restart par
+    # na khoyein). Fail ho to job fail nahi hota — helper khud log
+    # karta hai.
+    try:
+        _push_tg_cache_github(new_binds)
+    except Exception:
+        pass
     with _bulk_lock_get():
         job = _bulk_jobs.get(job_id)
         if job:

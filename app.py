@@ -32,7 +32,7 @@ from flask import Flask, request, session, jsonify, Response, send_from_director
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-20.2-bulk-dedupe"
+BACKEND_VERSION = "2026-10-20.3-lazy-dedupe"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -421,10 +421,19 @@ def _lazy_channel_cache_worker(title, artist, key):
     kuch mat daalo (agli baar phir try hoga).
     """
     try:
-        # Beech me kisi aur thread ne bind kar diya ho to skip.
-        fid, _ = _tg_cache_entry(key)
+        # Fix #3 (Om 2026-10-20): exact + smart-match wala lookup.
+        # Pehle exact-only tha — artist format farak (`,` vs `&`) par
+        # miss hota tha, phir _fresh_verified_media/ensure_media channel
+        # se hi download karke dobara upload kar deta tha (duplicates).
+        # Gaana channel me hai to skip, upload kabhi nahi.
+        fid = tg_cache_lookup(title, artist)
         if fid:
+            # Heal: exact key missing ho to bind kar do
+            cur, _ = _tg_cache_entry(key)
+            if not cur:
+                _tg_cache_bind(key, fid)
             return
+        # Beech me kisi aur thread ne bind kar diya ho to skip.
         vpath, err = _fresh_verified_media(title, artist)
         if not vpath or not os.path.exists(vpath):
             # Bot Fallback: Render par na mile to bot try karega.
@@ -461,7 +470,10 @@ def _stream_fetch(title, artist, ytid=None, for_download=False):
     was_cached = None
     if not ytid:
         try:
-            was_cached, _ = _tg_cache_entry((title + "|" + artist).lower())
+            # Fix #3 (Om 2026-10-20): pehle exact-only tha — smart-match
+            # wala lookup, taaki channel me maujood gaane ke liye lazy
+            # upload worker spawn hi na ho.
+            was_cached = tg_cache_lookup(title, artist)
         except Exception:
             was_cached = None
     path, err = ensure_media(title, artist, ytid=ytid,
@@ -547,7 +559,14 @@ def _cache_worker_loop():
         title, artist = tr
         try:
             key = (title + "|" + artist).lower()
-            fid, _ = _tg_cache_entry(key)
+            # Fix #3 (Om 2026-10-20): exact + smart-match. Pehle
+            # exact-only tha -> channel me maujood gaana dobara upload
+            # ho jata tha. Ab mile to skip, heal-bind ke saath.
+            fid = tg_cache_lookup(title, artist)
+            if fid:
+                cur, _ = _tg_cache_entry(key)
+                if not cur:
+                    _tg_cache_bind(key, fid)
             if not fid:
                 # STRICT pipeline (Om 2026-10-19): title + artist partial
                 # match + 2.5s duration — galat gaana channel par kabhi nahi.

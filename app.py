@@ -27,12 +27,20 @@ import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import dl_engine
+import github_safe_push
+# Fix 2 Phase 2.5: backend is built against safe-push flow v1. A
+# different flow version in the module file fails loudly at startup,
+# never at the first bulk-job push.
+github_safe_push.check_flow_version(1)
+print("[bulk_cache:github] safe-push module v%s flow v%s loaded"
+      % (github_safe_push.MODULE_VERSION, github_safe_push.FLOW_VERSION),
+      flush=True)
 
 from flask import Flask, request, session, jsonify, Response, send_from_directory
 
 APP_CODE = os.environ.get("APP_CODE", "")
 # Deploy signal: /api/version (no auth) isse batata hai kaunsa code live hai.
-BACKEND_VERSION = "2026-10-20.3-lazy-dedupe"
+BACKEND_VERSION = "2026-10-28.1-safe-push"
 TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8080"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -1029,7 +1037,8 @@ def _gate():
 
 @app.route("/api/version")
 def version():
-    return jsonify({"version": BACKEND_VERSION})
+    return jsonify({"version": BACKEND_VERSION,
+                    "safe_push": github_safe_push.version()})
 
 
 @app.route("/api/verify", methods=["POST"])
@@ -1473,7 +1482,10 @@ def bulk_cache():
     job_id = uuid.uuid4().hex[:16]
     with _bulk_lock_get():
         _bulk_jobs[job_id] = {"status": "running", "total": len(clean),
-                              "done": 0, "failed": [], "songs": clean}
+                              "done": 0, "failed": [], "songs": clean,
+                              "github_push": "pending",
+                              "github_push_detail": "",
+                              "github_push_at": None}
     import threading
     t = threading.Thread(target=_bulk_cache_worker, args=(job_id,),
                          daemon=True, name=f"bulkcache-{job_id[:8]}")
@@ -1497,7 +1509,10 @@ def bulk_cache_status():
                             "error": "koi job nahi mili"}), 404
         out = {"ok": True, "status": job["status"], "total": job["total"],
                "done": job["done"],
-               "failed": list(job["failed"])}
+               "failed": list(job["failed"]),
+               "github_push": job.get("github_push", "pending"),
+               "github_push_detail": job.get("github_push_detail", ""),
+               "github_push_at": job.get("github_push_at")}
         # Complete hone ke baad thodi der rakho taaki app final state
         # padh sake, phir saaf karo.
         if out["status"] == "done":
@@ -1505,73 +1520,205 @@ def bulk_cache_status():
     return jsonify(out)
 
 
-def _push_tg_cache_github(new_binds):
-    """Bulk job ke naye binds ko GitHub tg_cache.json par persist karo.
+class _GitHubTokenTransport(github_safe_push.Transport):
+    """Render adapter: GitHub API via urllib + Bearer token. Owns all
+    HTTP + auth; zero merge logic (that lives in the module).
 
-    Render ki disk ephemeral hai — sirf memory/disk bind karne se server
-    restart par binds kho jate the aur agla Create Cache click sab kuch
-    DOBARA upload kar deta tha (duplicates bug #2). Job ke end par poora
-    updated cache ek baar push karte hain. Token env (GITHUB_TOKEN /
-    GH_TOKEN) se milta hai — value kabhi log/print nahi hoti. Token na
-    mile ya push fail ho to sirf log; job fail nahi hota (memory+disk
-    binds to hain hi).
+    NOTE: tg_cache.json (~4.7MB) exceeds the contents API's 1MB inline
+    content limit, so content reads go through the git blobs API
+    (authoritative, same blob sha) -- never raw.githubusercontent
+    (CDN-stale content paired with a fresh API sha could clobber
+    newer keys).
     """
-    if not new_binds:
-        return
-    try:
-        import base64
-        # Full cache = disk file (binds wahan already hain) + is job ke
-        # binds jo kisi race me disk par na pahunche hon (safety merge).
-        d = _load_json_file(TG_CACHE_FILE, {})
-        if not isinstance(d, dict):
-            d = {}
-        for k, fid in new_binds.items():
-            cur = d.get(k)
-            if isinstance(cur, dict) and cur.get("file_id"):
-                continue
-            if isinstance(cur, str) and cur:
-                continue
-            d[k] = {"file_id": fid, "message_id": None}
-        try:
-            with open(TG_CACHE_FILE, "w") as f:
-                json.dump(d, f)
-        except Exception:
-            pass
-        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-        if not token:
-            print("[bulk_cache] GitHub push skipped: token env missing",
-                  flush=True)
-            return
-        api = ("https://api.github.com/repos/omeehathnoda/"
-               "musicdost-backend/contents/tg_cache.json")
-        headers = {"Authorization": "Bearer " + token,
+
+    API = "https://api.github.com/repos/omeehathnoda/musicdost-backend"
+
+    def __init__(self, token):
+        self._token = token
+
+    def _req(self, method, path, body=None, put=False, timeout=30):
+        import urllib.error
+        headers = {"Authorization": "Bearer " + self._token,
                    "Accept": "application/vnd.github+json",
                    "User-Agent": "musicdost-backend"}
-        sha = None
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(self.API + path, data=data,
+                                     headers=headers, method=method)
+        if data:
+            req.add_header("Content-Type", "application/json")
         try:
-            req = urllib.request.Request(api + "?ref=main",
-                                         headers=headers)
-            with urllib.request.urlopen(req, timeout=20) as r:
-                sha = json.loads(r.read()).get("sha")
-        except Exception:
-            sha = None
-        body = {"message": "bulk_cache: persist channel binds",
-                "content": base64.b64encode(
-                    json.dumps(d).encode()).decode(),
-                "branch": "main"}
-        if sha:
-            body["sha"] = sha
-        req = urllib.request.Request(api, data=json.dumps(body).encode(),
-                                     headers=headers, method="PUT")
-        req.add_header("Content-Type", "application/json")
-        with urllib.request.urlopen(req, timeout=30) as r:
-            r.read()
-        print("[bulk_cache] tg_cache.json GitHub par push hua "
-              "(%d naye binds)" % len(new_binds), flush=True)
-    except Exception:
-        print("[bulk_cache] GitHub push fail — binds memory+disk me hain",
-              flush=True)
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            try:
+                payload = json.loads(e.read().decode() or "{}")
+            except Exception:
+                payload = {}
+            return e.code, payload
+        except Exception as e:
+            # PUT errors are outcome-unknown (may have landed);
+            # GET errors are plain fetch failures.
+            if put:
+                raise github_safe_push.PutUncertain(str(e))
+            raise github_safe_push.FetchFailed(str(e))
 
+    def _blob_sha(self):
+        status, payload = self._req(
+            "GET", "/contents/tg_cache.json?ref=main")
+        if status != 200 or not payload.get("sha"):
+            raise github_safe_push.FetchFailed(
+                "contents sha fetch: %s" % status)
+        return payload["sha"]
+
+    def get_contents(self):
+        import base64
+        sha = self._blob_sha()
+        status, payload = self._req("GET", "/git/blobs/" + sha, timeout=60)
+        if status != 200 or payload.get("encoding") != "base64":
+            raise github_safe_push.FetchFailed("blob fetch: %s" % status)
+        try:
+            data = json.loads(base64.b64decode(payload["content"]))
+        except Exception:
+            raise github_safe_push.InvalidBase("blob not JSON")
+        if not isinstance(data, dict):
+            raise github_safe_push.InvalidBase("blob not a dict")
+        return data, sha
+
+    def get_verify(self):
+        # Authoritative re-read (API, never raw/CDN).
+        return self.get_contents()[0]
+
+    def put_contents(self, content, sha, message):
+        import base64
+        body = {"message": message,
+                "content": base64.b64encode(
+                    json.dumps(content).encode()).decode(),
+                "branch": "main", "sha": sha}
+        status, payload = self._req("PUT", "/contents/tg_cache.json",
+                                    body=body, put=True, timeout=60)
+        if status in (200, 201):
+            new_sha = (payload.get("content") or {}).get("sha")
+            if not new_sha:
+                raise github_safe_push.PutUncertain("PUT ok, no sha back")
+            return new_sha
+        if status in (409, 422):
+            raise github_safe_push.Conflict409("sha mismatch")
+        if status == 429:
+            raise github_safe_push.RateLimited("rate limited")
+        if status in (401, 403):
+            raise github_safe_push.AuthError("auth %s" % status)
+        if status >= 500:
+            raise github_safe_push.ServerError("server %s" % status)
+        raise github_safe_push.ServerError("PUT %s" % status)
+
+    def get_recent_flow_markers(self):
+        status, payload = self._req(
+            "GET", "/commits?path=tg_cache.json&per_page=10&sha=main")
+        if status != 200 or not isinstance(payload, list):
+            raise github_safe_push.FetchFailed(
+                "commits fetch: %s" % status)
+        return github_safe_push.parse_flow_markers(
+            [(c.get("commit") or {}).get("message", "") for c in payload])
+
+
+def _push_tg_cache_github(new_binds, job_id=None):
+    """Bulk job ke naye binds ko GitHub tg_cache.json par persist karo.
+
+    SAFE-PUSH FLOW (Fix 2 Phase 2.5): additive-only first-wins merge
+    via github_safe_push (module v1.0.0, flow v1). Kabhi overwrite /
+    coerce / delete nahi. Push sirf post-push verify ke baad
+    "verified" kehlata hai. Token env (GITHUB_TOKEN / GH_TOKEN) se
+    milta hai -- value kabhi log/print nahi hoti. Token na mile ya
+    push fail ho to job fail nahi hota (binds memory+disk me hain
+    hi), lekin status me github_push = failed/skipped_no_token /
+    uncertain dikhta hai -- "done" ka matlab sirf "songs cached"
+    hai, GitHub persistence ka daava kabhi nahi.
+    Push input = new_binds ∪ (memory − fresh GitHub): pichhli baar
+    fail hua push ke binds agle push par khud ride karte hain.
+    """
+    import time
+    job = None
+    if job_id:
+        with _bulk_lock_get():
+            job = _bulk_jobs.get(job_id)
+
+    def _set_status(state, detail):
+        if job is not None:
+            with _bulk_lock_get():
+                job["github_push"] = state
+                job["github_push_detail"] = detail
+                job["github_push_at"] = time.time()
+
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if not token:
+        print("[bulk_cache:github] push skipped: token env missing "
+              "(binds kept in memory+disk)", flush=True)
+        _set_status("skipped_no_token", "token env missing")
+        return {"status": "skipped_no_token", "added": [], "conflicts": []}
+    try:
+        transport = _GitHubTokenTransport(token)
+        # Fresh GitHub base (do baar fetch hota hai: yahan gap ke
+        # liye, aur safe_push ke andar -- job-end push rare hai,
+        # isliye simplicity ko caching par tarjeeh di gayi hai).
+        fresh, _fresh_sha = transport.get_contents()
+        mem = _tg_cache if isinstance(_tg_cache, dict) else {}
+        gap = {k: v for k, v in mem.items() if k not in fresh}
+        push_input = dict(gap)
+        push_input.update(new_binds or {})
+        print("[bulk_cache:github] push start writer=backend binds=%d "
+              "mem_gap=%d" % (len(push_input), len(gap)), flush=True)
+        res = github_safe_push.safe_push(transport, push_input,
+                                         writer_id="backend")
+        status = res["status"]
+        if status == "pushed":
+            state = "verified"
+            detail = "added %d, conflicts %d" % (
+                len(res["added"]), len(res["conflicts"]))
+            print("[bulk_cache:github] push verified added=%d "
+                  "conflicts=%d attempts=%d sha=%s"
+                  % (len(res["added"]), len(res["conflicts"]),
+                     res["attempts"], (res["post_sha"] or "")[:12]),
+                  flush=True)
+        elif status == "noop":
+            state = "noop"
+            if res["conflicts"]:
+                detail = ("conflicts %d (GitHub values kept)"
+                          % len(res["conflicts"]))
+            else:
+                detail = "all binds already present"
+            print("[bulk_cache:github] push noop (%s)" % detail, flush=True)
+        elif status == "uncertain":
+            state, detail = "uncertain", res["error"] or "uncertain"
+            print("[bulk_cache:github] push UNCERTAIN kind=%s attempts=%d "
+                  "(binds kept in memory+disk; will ride next push)"
+                  % (res["error"], res["attempts"]), flush=True)
+        else:
+            state, detail = "failed", res["error"] or "failed"
+            print("[bulk_cache:github] push FAILED kind=%s attempts=%d "
+                  "(binds kept in memory+disk; will ride next push)"
+                  % (res["error"], res["attempts"]), flush=True)
+        # Disk best-effort refresh (ephemeral; memory+GitHub hi asli
+        # hain): fresh base + is push me add hue keys.
+        try:
+            disk = dict(fresh)
+            for k in res["added"]:
+                disk[k] = push_input[k]
+            with open(TG_CACHE_FILE, "w") as f:
+                json.dump(disk, f)
+        except Exception:
+            pass
+        _set_status(state, detail)
+        return res
+    except Exception:
+        # safe_push khud kabhi raise nahi karta (sirf invalid binds
+        # par ValueError) -- ye guard transport ki unexpected galti
+        # ke liye hai; job kabhi fail nahi hota.
+        print("[bulk_cache:github] push FAILED kind=unexpected "
+              "(binds kept in memory+disk; will ride next push)",
+              flush=True)
+        _set_status("failed", "unexpected")
+        return {"status": "failed", "error": "unexpected", "added": [],
+                "conflicts": []}
 
 def _bulk_cache_worker(job_id):
     """Background me gaane channel me daalo, progress _bulk_jobs me.
@@ -1643,7 +1790,7 @@ def _bulk_cache_worker(job_id):
     # na khoyein). Fail ho to job fail nahi hota — helper khud log
     # karta hai.
     try:
-        _push_tg_cache_github(new_binds)
+        _push_tg_cache_github(new_binds, job_id)
     except Exception:
         pass
     with _bulk_lock_get():
